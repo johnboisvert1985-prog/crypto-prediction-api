@@ -12,29 +12,25 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(express.json());
 
-// ✅ ACTIVER CORS - IMPORTANT pour permettre les requêtes depuis le HTML local
+// CORS activé
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    
-    // Handle preflight requests
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
-    
     next();
 });
 
 // Configuration de l'API CoinGecko
 const COINGECKO_API = 'https://api.coingecko.com/api/v3';
-const COIN_ID = 'bitcoin';
 const API_KEY = process.env.COINGECKO_API_KEY;
-const DATA_FILE = path.join(__dirname, 'market_data.csv');
 
-// État de l'application
-let isDataCollected = false;
-let isCollecting = false;
+// Cache pour la liste des cryptos
+let cryptoListCache = null;
+let cryptoListCacheTime = null;
+const CACHE_DURATION = 3600000; // 1 heure
 
 // Headers avec clé API si disponible
 function getHeaders() {
@@ -46,58 +42,95 @@ function getHeaders() {
 }
 
 /**
- * Vérifie si le fichier de données existe
+ * Récupère la liste des top 100 cryptos depuis CoinGecko
  */
-function dataFileExists() {
-    return fs.existsSync(DATA_FILE);
+async function getTopCryptos() {
+    // Utiliser le cache si valide
+    if (cryptoListCache && cryptoListCacheTime && (Date.now() - cryptoListCacheTime < CACHE_DURATION)) {
+        return cryptoListCache;
+    }
+
+    try {
+        const headers = getHeaders();
+        const response = await axios.get(`${COINGECKO_API}/coins/markets`, {
+            params: {
+                vs_currency: 'usd',
+                order: 'market_cap_desc',
+                per_page: 100,
+                page: 1,
+                sparkline: false
+            },
+            headers: headers
+        });
+
+        const cryptoList = response.data.map(coin => ({
+            id: coin.id,
+            symbol: coin.symbol.toUpperCase(),
+            name: coin.name,
+            image: coin.image,
+            current_price: coin.current_price,
+            market_cap: coin.market_cap,
+            market_cap_rank: coin.market_cap_rank
+        }));
+
+        cryptoListCache = cryptoList;
+        cryptoListCacheTime = Date.now();
+
+        return cryptoList;
+    } catch (error) {
+        console.error('Erreur lors de la récupération de la liste:', error.message);
+        // Retourner une liste par défaut en cas d'erreur
+        return [
+            { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', market_cap_rank: 1 },
+            { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', market_cap_rank: 2 },
+            { id: 'binancecoin', symbol: 'BNB', name: 'BNB', market_cap_rank: 3 }
+        ];
+    }
 }
 
 /**
- * Collecte les données automatiquement
+ * Vérifie si le fichier de données existe pour une crypto
  */
-async function collectDataAutomatically() {
-    if (isCollecting) {
-        console.log('⏳ Collecte déjà en cours...');
-        return false;
-    }
+function dataFileExists(coinId) {
+    const filename = path.join(__dirname, `market_data_${coinId}.csv`);
+    return fs.existsSync(filename);
+}
 
-    isCollecting = true;
-    console.log('📊 Collecte automatique des données...');
+/**
+ * Collecte les données pour une crypto spécifique
+ */
+async function collectDataForCoin(coinId) {
+    console.log(`📊 Collecte des données pour ${coinId}...`);
 
     try {
         const pythonScript = path.join(__dirname, 'collect_data.py');
-        const { stdout, stderr } = await execFileAsync('python3', [pythonScript], {
-            timeout: 60000 // 60 secondes timeout
+        const { stdout, stderr } = await execFileAsync('python3', [pythonScript, coinId], {
+            timeout: 60000
         });
         
         if (stderr && stderr.includes('❌')) {
             console.error('Erreur lors de la collecte:', stderr);
-            isCollecting = false;
             return false;
         }
 
         console.log(stdout);
-        isDataCollected = true;
-        isCollecting = false;
         return true;
     } catch (error) {
-        console.error('❌ Erreur lors de la collecte automatique:', error.message);
-        isCollecting = false;
+        console.error(`❌ Erreur lors de la collecte pour ${coinId}:`, error.message);
         return false;
     }
 }
 
 /**
- * Récupère les données actuelles de Bitcoin depuis CoinGecko
+ * Récupère les données actuelles d'une crypto depuis CoinGecko
  */
-async function getCurrentBitcoinData() {
+async function getCurrentCryptoData(coinId) {
     try {
         const headers = getHeaders();
 
-        // Récupération du prix et volume actuels
         const simplePrice = axios.get(`${COINGECKO_API}/simple/price`, {
             params: {
-                ids: COIN_ID,
+                ids: coinId,
                 vs_currencies: 'usd',
                 include_24hr_vol: true,
                 include_24hr_change: true
@@ -105,8 +138,7 @@ async function getCurrentBitcoinData() {
             headers: headers
         });
 
-        // Récupération des données de marché détaillées
-        const marketData = axios.get(`${COINGECKO_API}/coins/${COIN_ID}/market_chart`, {
+        const marketData = axios.get(`${COINGECKO_API}/coins/${coinId}/market_chart`, {
             params: {
                 vs_currency: 'usd',
                 days: '2',
@@ -117,11 +149,14 @@ async function getCurrentBitcoinData() {
 
         const [priceResponse, chartResponse] = await Promise.all([simplePrice, marketData]);
         
-        const currentPrice = priceResponse.data[COIN_ID].usd;
-        const volume24h = priceResponse.data[COIN_ID].usd_24h_vol;
-        const priceChange24h = priceResponse.data[COIN_ID].usd_24h_change || 0;
+        if (!priceResponse.data[coinId]) {
+            throw new Error(`Crypto ${coinId} introuvable`);
+        }
 
-        // Calculer le changement de volume (approximation)
+        const currentPrice = priceResponse.data[coinId].usd;
+        const volume24h = priceResponse.data[coinId].usd_24h_vol;
+        const priceChange24h = priceResponse.data[coinId].usd_24h_change || 0;
+
         const volumes = chartResponse.data.total_volumes;
         const prevVolume = volumes[volumes.length - 2][1];
         const currVolume = volumes[volumes.length - 1][1];
@@ -130,33 +165,34 @@ async function getCurrentBitcoinData() {
         return {
             currentPrice,
             volume24h,
-            priceChange: priceChange24h / 100, // Convertir en décimal
-            volumeChange: volumeChange / 100    // Convertir en décimal
+            priceChange: priceChange24h / 100,
+            volumeChange: volumeChange / 100
         };
     } catch (error) {
         console.error('Erreur lors de la récupération des données:', error.message);
         if (error.response && error.response.status === 429) {
-            throw new Error('Limite de taux API CoinGecko atteinte. Veuillez patienter ou ajouter une clé API.');
+            throw new Error('Limite de taux API CoinGecko atteinte.');
         }
-        throw new Error('Impossible de récupérer les données de marché');
+        throw new Error(`Impossible de récupérer les données pour ${coinId}`);
     }
 }
 
 /**
  * Appelle le modèle Python pour faire une prédiction
  */
-async function callPythonModel(currentPrice, volume, priceChange, volumeChange) {
+async function callPythonModel(coinId, currentPrice, volume, priceChange, volumeChange) {
     try {
         const pythonScript = path.join(__dirname, 'ai_model.py');
         
         const { stdout, stderr } = await execFileAsync('python3', [
             pythonScript,
+            coinId,
             currentPrice.toString(),
             volume.toString(),
             priceChange.toString(),
             volumeChange.toString()
         ], {
-            timeout: 30000 // 30 secondes timeout
+            timeout: 30000
         });
 
         if (stderr) {
@@ -176,82 +212,80 @@ async function callPythonModel(currentPrice, volume, priceChange, volumeChange) 
 /**
  * Route principale
  */
-app.get('/', (req, res) => {
+app.get('/', async (req, res) => {
+    const cryptoList = await getTopCryptos();
+    
     res.json({
-        message: '🚀 API de Prédiction Crypto avec IA',
+        message: '🚀 API de Prédiction Crypto Multi-Devises avec IA',
         status: 'En ligne',
-        data_collected: isDataCollected,
-        data_file_exists: dataFileExists(),
         api_key_configured: !!API_KEY,
         cors_enabled: true,
+        supported_cryptos: cryptoList.length,
         endpoints: {
-            '/predict_price': 'GET - Obtenir la prédiction de prix Bitcoin',
-            '/health': 'GET - Vérifier l\'état du serveur',
-            '/collect_data': 'POST - Collecter les données historiques',
-            '/status': 'GET - Vérifier l\'état des données'
+            '/cryptos': 'GET - Liste des top 100 cryptos disponibles',
+            '/predict_price/:coin': 'GET - Prédiction pour une crypto spécifique',
+            '/collect_data/:coin': 'POST - Collecter les données pour une crypto',
+            '/health': 'GET - État du serveur',
+            '/status/:coin': 'GET - État des données pour une crypto'
+        },
+        examples: {
+            bitcoin: '/predict_price/bitcoin',
+            ethereum: '/predict_price/ethereum',
+            solana: '/predict_price/solana'
         },
         info: {
-            coin: 'Bitcoin (BTC)',
             model: 'Régression Linéaire',
-            data_period: '30 jours'
-        },
-        warning: !isDataCollected ? 'Les données ne sont pas encore collectées. Le serveur va les collecter automatiquement.' : null
+            data_period: '30 jours',
+            top_cryptos: cryptoList.slice(0, 5).map(c => `${c.name} (${c.symbol})`)
+        }
     });
 });
 
 /**
- * Route de statut des données
+ * Route pour obtenir la liste des cryptos disponibles
  */
-app.get('/status', (req, res) => {
-    res.json({
-        data_collected: isDataCollected,
-        data_file_exists: dataFileExists(),
-        is_collecting: isCollecting,
-        api_key_configured: !!API_KEY,
-        cors_enabled: true,
-        timestamp: new Date().toISOString()
-    });
-});
-
-/**
- * Route de santé
- */
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        uptime: process.uptime(),
-        data_ready: isDataCollected && dataFileExists(),
-        timestamp: new Date().toISOString(),
-        api_key_configured: !!API_KEY,
-        cors_enabled: true
-    });
-});
-
-/**
- * Route de prédiction principale
- */
-app.get('/predict_price', async (req, res) => {
+app.get('/cryptos', async (req, res) => {
     try {
-        // Vérifier si les données sont disponibles
-        if (!dataFileExists()) {
-            console.log('📊 Données manquantes, collecte automatique...');
-            const success = await collectDataAutomatically();
+        const cryptoList = await getTopCryptos();
+        res.json({
+            count: cryptoList.length,
+            cryptos: cryptoList
+        });
+    } catch (error) {
+        res.status(500).json({
+            error: 'Erreur lors de la récupération de la liste',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * Route de prédiction pour une crypto spécifique
+ */
+app.get('/predict_price/:coin', async (req, res) => {
+    const coinId = req.params.coin.toLowerCase();
+
+    try {
+        // Vérifier si les données existent
+        if (!dataFileExists(coinId)) {
+            console.log(`📊 Données manquantes pour ${coinId}, collecte automatique...`);
+            const success = await collectDataForCoin(coinId);
             
             if (!success) {
                 return res.status(503).json({
                     error: 'Données non disponibles',
-                    message: 'Impossible de collecter les données. Veuillez réessayer dans quelques minutes.',
-                    timestamp: new Date().toISOString(),
-                    help: 'Si le problème persiste, essayez d\'appeler POST /collect_data manuellement'
+                    message: `Impossible de collecter les données pour ${coinId}`,
+                    help: `Essayez POST /collect_data/${coinId} ou attendez quelques minutes`
                 });
             }
         }
 
-        console.log('📊 Récupération des données de marché...');
-        const marketData = await getCurrentBitcoinData();
+        console.log(`📊 Récupération des données de marché pour ${coinId}...`);
+        const marketData = await getCurrentCryptoData(coinId);
         
-        console.log('🤖 Exécution du modèle IA...');
+        console.log(`🤖 Exécution du modèle IA pour ${coinId}...`);
         const prediction = await callPythonModel(
+            coinId,
             marketData.currentPrice,
             marketData.volume24h,
             marketData.priceChange,
@@ -269,9 +303,14 @@ app.get('/predict_price', async (req, res) => {
             signalEmoji = '🔴';
         }
 
+        // Récupérer les infos de la crypto
+        const cryptoList = await getTopCryptos();
+        const cryptoInfo = cryptoList.find(c => c.id === coinId) || { name: coinId.toUpperCase(), symbol: '?' };
+
         const response = {
             timestamp: new Date().toISOString(),
-            coin: 'Bitcoin (BTC)',
+            coin: `${cryptoInfo.name} (${cryptoInfo.symbol})`,
+            coin_id: coinId,
             latest_price: {
                 value: marketData.currentPrice,
                 currency: 'USD'
@@ -301,118 +340,106 @@ app.get('/predict_price', async (req, res) => {
             model_metrics: prediction.model_metrics
         };
 
-        console.log('✅ Prédiction générée avec succès');
+        console.log(`✅ Prédiction générée avec succès pour ${coinId}`);
         res.json(response);
 
     } catch (error) {
-        console.error('❌ Erreur:', error);
+        console.error(`❌ Erreur pour ${coinId}:`, error);
         res.status(500).json({
             error: 'Erreur lors de la génération de la prédiction',
             message: error.message,
-            timestamp: new Date().toISOString(),
-            help: error.message.includes('Limite de taux') 
-                ? 'Obtenez une clé API gratuite sur https://www.coingecko.com/en/api/pricing'
-                : 'Les données sont peut-être en cours de collecte. Réessayez dans quelques secondes.'
+            coin_id: coinId,
+            timestamp: new Date().toISOString()
         });
     }
 });
 
 /**
- * Route pour collecter les données historiques
+ * Route pour collecter les données d'une crypto
  */
-app.post('/collect_data', async (req, res) => {
-    if (isCollecting) {
-        return res.status(429).json({
-            success: false,
-            message: 'Collecte déjà en cours',
-            timestamp: new Date().toISOString()
-        });
-    }
-
-    console.log('📊 Démarrage de la collecte de données manuelle...');
+app.post('/collect_data/:coin', async (req, res) => {
+    const coinId = req.params.coin.toLowerCase();
     
-    const success = await collectDataAutomatically();
+    console.log(`📊 Démarrage de la collecte pour ${coinId}...`);
+    
+    const success = await collectDataForCoin(coinId);
     
     if (success) {
         res.json({
             success: true,
-            message: 'Données collectées avec succès',
-            data_file_exists: dataFileExists(),
+            message: `Données collectées avec succès pour ${coinId}`,
+            coin_id: coinId,
+            data_file_exists: dataFileExists(coinId),
             timestamp: new Date().toISOString()
         });
     } else {
         res.status(500).json({
             success: false,
             error: 'Erreur lors de la collecte des données',
-            help: 'Attendez quelques minutes et réessayez. Limite API CoinGecko peut-être atteinte.',
+            coin_id: coinId,
+            help: 'Attendez quelques minutes et réessayez. Limite API peut-être atteinte.',
             timestamp: new Date().toISOString()
         });
     }
 });
 
-// Collecte automatique au démarrage
-async function initializeServer() {
-    console.log('🔍 Vérification de l\'existence des données...');
+/**
+ * Route de statut pour une crypto
+ */
+app.get('/status/:coin', (req, res) => {
+    const coinId = req.params.coin.toLowerCase();
     
-    if (!dataFileExists()) {
-        console.log('❌ Fichier market_data.csv introuvable');
-        console.log('📊 Collecte automatique des données au démarrage...');
-        
-        // Attendre un peu pour éviter les limites de taux si déployé récemment
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        const success = await collectDataAutomatically();
-        
-        if (success) {
-            console.log('✅ Données collectées avec succès au démarrage!');
-        } else {
-            console.log('⚠️  Échec de la collecte au démarrage. Les données seront collectées à la première prédiction.');
-        }
-    } else {
-        console.log('✅ Fichier market_data.csv trouvé');
-        isDataCollected = true;
-    }
-}
+    res.json({
+        coin_id: coinId,
+        data_file_exists: dataFileExists(coinId),
+        api_key_configured: !!API_KEY,
+        cors_enabled: true,
+        timestamp: new Date().toISOString()
+    });
+});
+
+/**
+ * Route de santé
+ */
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        api_key_configured: !!API_KEY,
+        cors_enabled: true
+    });
+});
 
 // Démarrage du serveur
 app.listen(PORT, async () => {
     console.log('═══════════════════════════════════════════════════════');
-    console.log('🚀 Serveur API de Prédiction Crypto démarré!');
+    console.log('🚀 Serveur API Multi-Crypto démarré!');
     console.log('═══════════════════════════════════════════════════════');
     console.log(`📡 Port: ${PORT}`);
     console.log(`🌐 URL: http://localhost:${PORT}`);
-    console.log(`🔮 Prédiction: http://localhost:${PORT}/predict_price`);
-    console.log(`🔑 Clé API CoinGecko: ${API_KEY ? '✅ Configurée' : '⚠️  Non configurée (API gratuite)'}`);
-    console.log(`✅ CORS: Activé (requêtes depuis n'importe où)`);
+    console.log(`🔑 Clé API: ${API_KEY ? '✅ Configurée' : '⚠️  Non configurée'}`);
+    console.log(`✅ CORS: Activé`);
     console.log('═══════════════════════════════════════════════════════');
-    console.log('💡 Endpoints disponibles:');
-    console.log('   GET  / - Page d\'accueil');
-    console.log('   GET  /predict_price - Prédiction de prix');
-    console.log('   GET  /health - État du serveur');
-    console.log('   GET  /status - État des données');
-    console.log('   POST /collect_data - Collecter les données');
+    console.log('💡 Endpoints:');
+    console.log('   GET  /cryptos - Liste des top 100 cryptos');
+    console.log('   GET  /predict_price/:coin - Prédiction');
+    console.log('   POST /collect_data/:coin - Collecter données');
+    console.log('   GET  /status/:coin - État des données');
+    console.log('   GET  /health - Santé du serveur');
     console.log('═══════════════════════════════════════════════════════');
     
-    if (!API_KEY) {
-        console.log('⚠️  ATTENTION: Pas de clé API configurée');
-        console.log('   L\'API gratuite a des limites (30 appels/min)');
-        console.log('   Pour augmenter les limites:');
-        console.log('   1. Obtenez une clé gratuite sur https://www.coingecko.com/en/api/pricing');
-        console.log('   2. Ajoutez COINGECKO_API_KEY dans vos variables d\'environnement');
-        console.log('═══════════════════════════════════════════════════════');
-    }
-    
-    // Initialiser les données
-    await initializeServer();
-    
+    // Charger la liste des cryptos au démarrage
+    console.log('📊 Chargement de la liste des top 100 cryptos...');
+    const cryptos = await getTopCryptos();
+    console.log(`✅ ${cryptos.length} cryptos chargées`);
+    console.log(`🔝 Top 5: ${cryptos.slice(0, 5).map(c => c.symbol).join(', ')}`);
     console.log('═══════════════════════════════════════════════════════');
-    console.log('✅ Serveur prêt à recevoir des requêtes!');
-    console.log('═══════════════════════════════════════════════════════');
+    console.log('✅ Serveur prêt!');
 });
 
-// Gestion des erreurs non capturées
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('Promesse rejetée non gérée:', reason);
+    console.error('Promesse rejetée:', reason);
 });
 
 process.on('uncaughtException', (error) => {
