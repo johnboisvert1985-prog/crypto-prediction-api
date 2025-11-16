@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { spawn } = require('child_process');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,45 +9,14 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.static('public'));
 
-// Cache pour la liste des cryptos
+// Cache pour la liste des cryptos (rafraîchi toutes les heures)
 let cryptoListCache = null;
 let cacheTimestamp = null;
 const CACHE_DURATION = 60 * 60 * 1000; // 1 heure
 
-// Données mock TOP 100 cryptos (pour test immédiat)
-const MOCK_CRYPTOS = [
-    { id: "bitcoin", symbol: "BTC", name: "Bitcoin", rank: 1, price: 43250.50, market_cap: 846000000000, price_change_24h: 2.5 },
-    { id: "ethereum", symbol: "ETH", name: "Ethereum", rank: 2, price: 2280.45, market_cap: 274000000000, price_change_24h: 3.2 },
-    { id: "binancecoin", symbol: "BNB", name: "BNB", rank: 3, price: 310.20, market_cap: 47500000000, price_change_24h: 1.8 },
-    { id: "solana", symbol: "SOL", name: "Solana", rank: 4, price: 98.75, market_cap: 43200000000, price_change_24h: 5.1 },
-    { id: "ripple", symbol: "XRP", name: "XRP", rank: 5, price: 0.62, market_cap: 33800000000, price_change_24h: -0.8 },
-    { id: "cardano", symbol: "ADA", name: "Cardano", rank: 6, price: 0.58, market_cap: 20400000000, price_change_24h: 1.2 },
-    { id: "avalanche-2", symbol: "AVAX", name: "Avalanche", rank: 7, price: 38.90, market_cap: 14600000000, price_change_24h: 4.3 },
-    { id: "dogecoin", symbol: "DOGE", name: "Dogecoin", rank: 8, price: 0.088, market_cap: 12500000000, price_change_24h: 2.1 },
-    { id: "polkadot", symbol: "DOT", name: "Polkadot", rank: 9, price: 7.25, market_cap: 9800000000, price_change_24h: -1.5 },
-    { id: "chainlink", symbol: "LINK", name: "Chainlink", rank: 10, price: 14.85, market_cap: 8500000000, price_change_24h: 3.7 },
-    { id: "tron", symbol: "TRX", name: "TRON", rank: 11, price: 0.105, market_cap: 9200000000, price_change_24h: 1.9 },
-    { id: "matic-network", symbol: "MATIC", name: "Polygon", rank: 12, price: 0.82, market_cap: 7600000000, price_change_24h: 2.8 },
-    { id: "litecoin", symbol: "LTC", name: "Litecoin", rank: 13, price: 72.50, market_cap: 5400000000, price_change_24h: 0.9 },
-    { id: "shiba-inu", symbol: "SHIB", name: "Shiba Inu", rank: 14, price: 0.000024, market_cap: 14200000000, price_change_24h: 4.2 },
-    { id: "uniswap", symbol: "UNI", name: "Uniswap", rank: 15, price: 6.45, market_cap: 4800000000, price_change_24h: 1.5 }
-];
-
-// Générer 485 cryptos supplémentaires pour atteindre 500
-for (let i = 16; i <= 500; i++) {
-    MOCK_CRYPTOS.push({
-        id: `crypto-${i}`,
-        symbol: `CRY${i}`,
-        name: `Crypto ${i}`,
-        rank: i,
-        price: Math.random() * 100,
-        market_cap: Math.random() * 1000000000,
-        price_change_24h: (Math.random() - 0.5) * 10
-    });
-}
-
-// Endpoint pour obtenir la liste des cryptos
+// Endpoint pour obtenir la liste des TOP 250 cryptos
 app.get('/api/crypto-list', async (req, res) => {
     try {
         // Vérifier le cache
@@ -55,33 +25,60 @@ app.get('/api/crypto-list', async (req, res) => {
             return res.json(cryptoListCache);
         }
 
-        console.log('🔄 Chargement des données (MODE TEST)...');
+        console.log('🔄 Récupération de la liste des TOP 250 cryptos...');
         
-        // Simuler un délai comme une vraie API
-        await new Promise(resolve => setTimeout(resolve, 500));
+        const fetch = (await import('node-fetch')).default;
         
-        // Formater avec images
-        const cryptoList = MOCK_CRYPTOS.map(crypto => ({
-            ...crypto,
-            image: `https://via.placeholder.com/32/6366f1/ffffff?text=${crypto.symbol}`
+        // Récupérer le TOP 250 (1 seule page)
+        const pages = 1; // 1 page × 250 = 250 cryptos (OPTIMAL)
+        let allCryptos = [];
+        
+        for (let page = 1; page <= pages; page++) {
+            const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}&sparkline=false`;
+            
+            console.log(`📡 Requête page ${page}/${pages}...`);
+            const response = await fetch(url);
+            
+            if (!response.ok) {
+                if (response.status === 429) {
+                    throw new Error(`Rate limit CoinGecko atteint. Réessayez dans 1 minute.`);
+                }
+                throw new Error(`Erreur API CoinGecko: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            allCryptos = allCryptos.concat(data);
+            
+            console.log(`✅ Page ${page}/${pages} récupérée (${data.length} cryptos)`);
+        }
+
+        // Formater la liste
+        const cryptoList = allCryptos.map((crypto, index) => ({
+            id: crypto.id,
+            symbol: crypto.symbol.toUpperCase(),
+            name: crypto.name,
+            rank: index + 1,
+            price: crypto.current_price,
+            market_cap: crypto.market_cap,
+            price_change_24h: crypto.price_change_percentage_24h,
+            image: crypto.image
         }));
 
         // Mettre en cache
         cryptoListCache = {
             cryptos: cryptoList,
             total: cryptoList.length,
-            timestamp: new Date().toISOString(),
-            note: "Données de test - CoinGecko rate limit actif"
+            timestamp: new Date().toISOString()
         };
         cacheTimestamp = Date.now();
 
-        console.log(`✅ Liste TOP ${cryptoList.length} cryptos (MODE TEST) mise en cache`);
+        console.log(`✅ Liste TOP ${cryptoList.length} cryptos mise en cache`);
         res.json(cryptoListCache);
 
     } catch (error) {
-        console.error('❌ Erreur:', error);
+        console.error('❌ Erreur lors de la récupération de la liste:', error);
         res.status(500).json({
-            error: 'Erreur lors de la récupération de la liste',
+            error: 'Erreur lors de la récupération de la liste des cryptomonnaies',
             message: error.message
         });
     }
@@ -95,6 +92,7 @@ app.get('/api/predict/:coinId', async (req, res) => {
     console.log('⏳ Collecte des données en cours...');
 
     try {
+        // 1. Collecter les données
         const collectData = spawn('python3', ['collect_data.py', coinId]);
         
         let collectOutput = '';
@@ -123,6 +121,7 @@ app.get('/api/predict/:coinId', async (req, res) => {
         console.log('✅ Données collectées avec succès');
         console.log('🤖 Entraînement du modèle IA...');
 
+        // 2. Entraîner le modèle et faire la prédiction
         const runModel = spawn('python3', ['ai_model.py']);
         
         let modelOutput = '';
@@ -144,6 +143,7 @@ app.get('/api/predict/:coinId', async (req, res) => {
                     reject(new Error(`Erreur modèle IA: ${modelError}`));
                 } else {
                     try {
+                        // Extraire le JSON de la sortie
                         const jsonMatch = modelOutput.match(/\{[\s\S]*\}/);
                         if (jsonMatch) {
                             const prediction = JSON.parse(jsonMatch[0]);
@@ -175,8 +175,7 @@ app.get('/api/health', (req, res) => {
     res.json({
         status: 'online',
         timestamp: new Date().toISOString(),
-        cache: cryptoListCache ? `${cryptoListCache.total} cryptos en cache (MODE TEST)` : 'Aucun cache',
-        note: 'Données de test - CoinGecko rate limit actif'
+        cache: cryptoListCache ? `${cryptoListCache.total} cryptos en cache` : 'Aucun cache'
     });
 });
 
@@ -185,7 +184,7 @@ app.listen(PORT, () => {
     console.log(`\n${'='.repeat(60)}`);
     console.log(`🚀 Serveur de prédiction crypto IA démarré!`);
     console.log(`📡 Port: ${PORT}`);
-    console.log(`⚠️  MODE TEST: Données mockées (500 cryptos)`);
-    console.log(`💡 CoinGecko rate limit actif - Réessayez demain`);
+    console.log(`🌐 http://localhost:${PORT}`);
+    console.log(`💹 Support: TOP 250 cryptomonnaies`);
     console.log(`${'='.repeat(60)}\n`);
 });
