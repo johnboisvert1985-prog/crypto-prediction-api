@@ -30,7 +30,7 @@ app.get('/api/crypto-list', async (req, res) => {
         const fetch = (await import('node-fetch')).default;
         
         // Récupérer le TOP 250 (1 seule page)
-        const pages = 1; // 1 page × 250 = 250 cryptos (OPTIMAL)
+        const pages = 1; // 1 page × 250 = 250 cryptos
         let allCryptos = [];
         
         for (let page = 1; page <= pages; page++) {
@@ -84,7 +84,7 @@ app.get('/api/crypto-list', async (req, res) => {
     }
 });
 
-// Endpoint pour obtenir la prédiction
+// Endpoint pour obtenir la prédiction - VERSION 2
 app.get('/api/predict/:coinId', async (req, res) => {
     const { coinId } = req.params;
     
@@ -92,8 +92,8 @@ app.get('/api/predict/:coinId', async (req, res) => {
     console.log('⏳ Collecte des données en cours...');
 
     try {
-        // 1. Collecter les données
-        const collectData = spawn('python3', ['collect_data.py', coinId]);
+        // 1. Collecter les données avec le nouveau script V2
+        const collectData = spawn('python3', ['collect_data_v2.py', coinId]);
         
         let collectOutput = '';
         let collectError = '';
@@ -111,7 +111,7 @@ app.get('/api/predict/:coinId', async (req, res) => {
         await new Promise((resolve, reject) => {
             collectData.on('close', (code) => {
                 if (code !== 0) {
-                    reject(new Error(`Erreur collecte données: ${collectError}`));
+                    reject(new Error(`Erreur collecte données: ${collectError || 'Code ' + code}`));
                 } else {
                     resolve();
                 }
@@ -119,10 +119,10 @@ app.get('/api/predict/:coinId', async (req, res) => {
         });
 
         console.log('✅ Données collectées avec succès');
-        console.log('🤖 Entraînement du modèle IA...');
+        console.log('🤖 Entraînement du modèle IA V2...');
 
-        // 2. Entraîner le modèle et faire la prédiction
-        const runModel = spawn('python3', ['ai_model.py']);
+        // 2. Entraîner le modèle et faire la prédiction avec V2
+        const runModel = spawn('python3', ['ai_model_v2.py']);
         
         let modelOutput = '';
         let modelError = '';
@@ -140,7 +140,7 @@ app.get('/api/predict/:coinId', async (req, res) => {
         const result = await new Promise((resolve, reject) => {
             runModel.on('close', (code) => {
                 if (code !== 0) {
-                    reject(new Error(`Erreur modèle IA: ${modelError}`));
+                    reject(new Error(`Erreur modèle IA: ${modelError || 'Code ' + code}`));
                 } else {
                     try {
                         // Extraire le JSON de la sortie
@@ -175,16 +175,18 @@ app.get('/api/health', (req, res) => {
     res.json({
         status: 'online',
         timestamp: new Date().toISOString(),
-        cache: cryptoListCache ? `${cryptoListCache.total} cryptos en cache` : 'Aucun cache'
+        cache: cryptoListCache ? `${cryptoListCache.total} cryptos en cache` : 'Aucun cache',
+        version: '2.0 - Linear Regression Model'
     });
 });
 
 // Démarrage du serveur
 app.listen(PORT, () => {
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`🚀 Serveur de prédiction crypto IA démarré!`);
+    console.log(`🚀 Serveur de prédiction crypto IA V2 démarré!`);
     console.log(`📡 Port: ${PORT}`);
     console.log(`🌐 http://localhost:${PORT}`);
     console.log(`💹 Support: TOP 250 cryptomonnaies`);
+    console.log(`🤖 Modèle: Linear Regression (CoinGecko Style)`);
     console.log(`${'='.repeat(60)}\n`);
 });
