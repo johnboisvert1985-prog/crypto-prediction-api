@@ -25,49 +25,35 @@ app.get('/api/crypto-list', async (req, res) => {
             return res.json(cryptoListCache);
         }
 
-        console.log('🔄 Récupération de la liste des TOP 500 cryptos...');
+        console.log('🔄 Récupération de la liste via CoinCap API...');
         
         const fetch = (await import('node-fetch')).default;
         
-        // Récupérer le TOP 500 en plusieurs pages (250 par page)
-        const pages = 2; // 2 pages × 250 = 500 cryptos
-        let allCryptos = [];
+        // CoinCap API - Récupérer TOP 500 (max 2000 par requête)
+        const url = 'https://api.coincap.io/v2/assets?limit=500';
         
-        for (let page = 1; page <= pages; page++) {
-            const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}&sparkline=false`;
-            
-            console.log(`📡 Requête page ${page}/${pages}...`);
-            const response = await fetch(url);
-            
-            if (!response.ok) {
-                if (response.status === 429) {
-                    throw new Error(`Rate limit CoinGecko atteint. Réessayez dans 1 minute.`);
-                }
-                throw new Error(`Erreur API CoinGecko: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            allCryptos = allCryptos.concat(data);
-            
-            console.log(`✅ Page ${page}/${pages} récupérée (${data.length} cryptos)`);
-            
-            // Pause de 3 secondes entre les requêtes pour respecter les limites
-            if (page < pages) {
-                console.log(`⏳ Pause de 3 secondes...`);
-                await new Promise(resolve => setTimeout(resolve, 3000));
-            }
+        console.log('📡 Requête CoinCap API...');
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            throw new Error(`Erreur CoinCap API: ${response.status}`);
         }
-
-        // Formater la liste
-        const cryptoList = allCryptos.map((crypto, index) => ({
+        
+        const result = await response.json();
+        const data = result.data;
+        
+        console.log(`✅ ${data.length} cryptos récupérées`);
+        
+        // Formater la liste pour correspondre au format CoinGecko
+        const cryptoList = data.map((crypto, index) => ({
             id: crypto.id,
-            symbol: crypto.symbol.toUpperCase(),
+            symbol: crypto.symbol,
             name: crypto.name,
-            rank: index + 1,
-            price: crypto.current_price,
-            market_cap: crypto.market_cap,
-            price_change_24h: crypto.price_change_percentage_24h,
-            image: crypto.image
+            rank: parseInt(crypto.rank),
+            price: parseFloat(crypto.priceUsd),
+            market_cap: parseFloat(crypto.marketCapUsd),
+            price_change_24h: parseFloat(crypto.changePercent24Hr),
+            image: `https://assets.coincap.io/assets/icons/${crypto.symbol.toLowerCase()}@2x.png`
         }));
 
         // Mettre en cache
@@ -191,6 +177,6 @@ app.listen(PORT, () => {
     console.log(`🚀 Serveur de prédiction crypto IA démarré!`);
     console.log(`📡 Port: ${PORT}`);
     console.log(`🌐 http://localhost:${PORT}`);
-    console.log(`💹 Support: TOP 500 cryptomonnaies`);
+    console.log(`💹 Support: TOP 500 cryptomonnaies via CoinCap`);
     console.log(`${'='.repeat(60)}\n`);
 });
