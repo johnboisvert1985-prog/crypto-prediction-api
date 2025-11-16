@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 Prédiction Crypto IA - TOP 1000</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            border-radius: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 20px 60px rgba(99, 102, 241, 0.3);
+        }
+
+        .header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.95;
+        }
+
+        /* Modal Configuration */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            margin: 10% auto;
+            padding: 40px;
+            border: 2px solid #6366f1;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-title {
+            font-size: 2em;
+            margin-bottom: 20px;
+            color: #6366f1;
+        }
+
+        .modal-input {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.1em;
+            border: 2px solid #6366f1;
+            border-radius: 12px;
+            background: rgba(15, 23, 42, 0.9);
+            color: #e2e8f0;
+            margin-bottom: 20px;
+        }
+
+        .modal-button {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.2em;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .modal-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(16, 185, 129, 0.6);
+        }
+
+        .modal-example {
+            background: rgba(99, 102, 241, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 4px solid #6366f1;
+        }
+
+        /* API Status */
+        .api-status {
+            text-align: center;
+            padding: 15px;
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            cursor: pointer;
+        }
+
+        .api-status:hover {
+            background: rgba(30, 41, 59, 1);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-online {
+            background: #10b981;
+        }
+
+        .status-offline {
+            background: #ef4444;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Le reste du CSS de index.html... */
+        .search-section {
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .search-container {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .search-box {
+            flex: 1;
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 18px 50px 18px 20px;
+            font-size: 1.1em;
+            border: 2px solid rgba(99, 102, 241, 0.3);
+            border-radius: 12px;
+            background: rgba(15, 23, 42, 0.9);
+            color: #e2e8f0;
+            transition: all 0.3s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 18px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.3em;
+            color: #6366f1;
+        }
+
+        .select-box {
+            min-width: 300px;
+        }
+
+        select {
+            width: 100%;
+            padding: 18px 20px;
+            font-size: 1.1em;
+            border: 2px solid rgba(99, 102, 241, 0.3);
+            border-radius: 12px;
+            background: rgba(15, 23, 42, 0.9);
+            color: #e2e8f0;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+        }
+
+        select option {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 10px;
+        }
+
+        .predict-button {
+            padding: 18px 40px;
+            font-size: 1.2em;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+            min-width: 200px;
+        }
+
+        .predict-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(16, 185, 129, 0.6);
+        }
+
+        .predict-button:active {
+            transform: translateY(0);
+        }
+
+        .predict-button:disabled {
+            background: #475569;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            margin: 20px 0;
+        }
+
+        .spinner {
+            border: 4px solid rgba(99, 102, 241, 0.2);
+            border-top: 4px solid #6366f1;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(220, 38, 38, 0.2) 100%);
+            border: 2px solid rgba(239, 68, 68, 0.5);
+            padding: 25px;
+            border-radius: 16px;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .error-icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+        }
+
+        .crypto-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px;
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 12px;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+        }
+
+        .crypto-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .search-container {
+                flex-direction: column;
+            }
+
+            .select-box {
+                min-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Modal de Configuration -->
+    <div id="configModal" class="modal">
+        <div class="modal-content">
+            <h2 class="modal-title">🔧 Configuration API Render</h2>
+            <p style="margin-bottom: 20px; color: #94a3b8;">
+                Entre l'URL de ton API Render déployée:
+            </p>
+            
+            <div class="modal-example">
+                <strong>Exemple:</strong><br>
+                <code>https://crypto-prediction-ai.onrender.com</code>
+            </div>
+
+            <input 
+                type="text" 
+                id="apiUrlInput" 
+                class="modal-input" 
+                placeholder="https://ton-app.onrender.com"
+                value="https://">
+
+            <button class="modal-button" onclick="saveApiUrl()">
+                ✅ Enregistrer et Continuer
+            </button>
+
+            <p style="margin-top: 20px; font-size: 0.9em; color: #64748b;">
+                💡 Trouve ton URL dans le dashboard Render
+            </p>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Status API -->
+        <div class="api-status" onclick="changeApiUrl()">
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span id="apiStatusText">Vérification de la connexion...</span>
+            <span style="color: #64748b; font-size: 0.9em; margin-left: 10px;">(Cliquer pour changer)</span>
+        </div>
+
+        <div class="header">
+            <h1>🤖 Prédiction Crypto IA</h1>
+            <p>Analyse et prédiction par intelligence artificielle - TOP 1000 Cryptomonnaies</p>
+        </div>
+
+        <div class="search-section">
+            <div class="search-container">
+                <div class="search-box">
+                    <input type="text" id="searchInput" class="search-input" placeholder="Rechercher une crypto (nom ou symbole)...">
+                    <span class="search-icon">🔍</span>
+                </div>
+                <div class="select-box">
+                    <select id="cryptoSelect">
+                        <option value="">📊 Chargement des cryptos...</option>
+                    </select>
+                </div>
+                <button onclick="loadPrediction()" class="predict-button" id="predictBtn">
+                    🔮 Prédire
+                </button>
+            </div>
+            <div id="selectedCryptoInfo"></div>
+        </div>
+
+        <div id="content"></div>
+    </div>
+
+    <script>
+        // Configuration API - Stockée dans localStorage
+        let API_URL = localStorage.getItem('render_api_url');
+        let allCryptos = [];
+        let selectedCrypto = null;
+
+        // Vérifier si l'URL est configurée
+        if (!API_URL || API_URL === 'null') {
+            document.getElementById('configModal').style.display = 'block';
+        } else {
+            console.log('🔗 API URL configurée:', API_URL);
+            checkApiStatus();
+            init();
+        }
+
+        function saveApiUrl() {
+            const input = document.getElementById('apiUrlInput');
+            let url = input.value.trim();
+            
+            // Nettoyer l'URL
+            if (url.endsWith('/')) {
+                url = url.slice(0, -1);
+            }
+            
+            if (!url.startsWith('http')) {
+                alert('⚠️ L\'URL doit commencer par https://');
+                return;
+            }
+
+            API_URL = url;
+            localStorage.setItem('render_api_url', url);
+            document.getElementById('configModal').style.display = 'none';
+            
+            console.log('✅ API URL enregistrée:', API_URL);
+            checkApiStatus();
+            init();
+        }
+
+        function changeApiUrl() {
+            document.getElementById('apiUrlInput').value = API_URL || 'https://';
+            document.getElementById('configModal').style.display = 'block';
+        }
+
+        async function checkApiStatus() {
+            const statusIndicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('apiStatusText');
+            
+            statusIndicator.className = 'status-indicator';
+            statusText.textContent = 'Vérification...';
+
+            try {
+                const response = await fetch(`${API_URL}/api/health`);
+                const data = await response.json();
+                
+                if (data.status === 'online') {
+                    statusIndicator.classList.add('status-online');
+                    statusText.innerHTML = `✅ Connecté: <strong>${API_URL}</strong>`;
+                } else {
+                    throw new Error('API offline');
+                }
+            } catch (error) {
+                statusIndicator.classList.add('status-offline');
+                statusText.innerHTML = `❌ Erreur: <strong>${API_URL}</strong> non disponible`;
+                console.error('Status check failed:', error);
+            }
+        }
+
+        // Fonction pour formater les nombres
+        function formatNumber(num) {
+            if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
+            if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
+            if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
+            return num.toFixed(2);
+        }
+
+        function formatPrice(price) {
+            if (price >= 1000) return '$' + price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            if (price >= 1) return '$' + price.toFixed(4);
+            return '$' + price.toFixed(8);
+        }
+
+        function formatPercent(percent) {
+            const sign = percent >= 0 ? '+' : '';
+            return sign + percent.toFixed(2) + '%';
+        }
+
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleString('fr-FR', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        // Charger la liste des cryptos
+        async function loadCryptoList() {
+            try {
+                console.log('📊 Chargement de la liste des cryptos...');
+                const response = await fetch(`${API_URL}/api/crypto-list`);
+                const data = await response.json();
+                
+                allCryptos = data.cryptos;
+                
+                const select = document.getElementById('cryptoSelect');
+                select.innerHTML = '<option value="">🎯 Sélectionner une cryptomonnaie...</option>';
+                
+                allCryptos.forEach(crypto => {
+                    const option = document.createElement('option');
+                    option.value = crypto.id;
+                    option.textContent = `#${crypto.rank} ${crypto.name} (${crypto.symbol}) - ${formatPrice(crypto.price)}`;
+                    option.dataset.crypto = JSON.stringify(crypto);
+                    select.appendChild(option);
+                });
+
+                console.log(`✅ ${allCryptos.length} cryptos chargées`);
+                checkApiStatus(); // Mettre à jour le statut
+                
+            } catch (error) {
+                console.error('❌ Erreur chargement liste:', error);
+                const select = document.getElementById('cryptoSelect');
+                select.innerHTML = `<option value="">❌ Erreur: API non disponible</option>`;
+                checkApiStatus();
+            }
+        }
+
+        // Recherche en temps réel
+        document.addEventListener('DOMContentLoaded', () => {
+            const searchInput = document.getElementById('searchInput');
+            const select = document.getElementById('cryptoSelect');
+
+            searchInput.addEventListener('input', (e) => {
+                const searchTerm = e.target.value.toLowerCase();
+                
+                select.innerHTML = '<option value="">🎯 Sélectionner une cryptomonnaie...</option>';
+                
+                const filtered = allCryptos.filter(crypto => 
+                    crypto.name.toLowerCase().includes(searchTerm) ||
+                    crypto.symbol.toLowerCase().includes(searchTerm)
+                );
+
+                filtered.forEach(crypto => {
+                    const option = document.createElement('option');
+                    option.value = crypto.id;
+                    option.textContent = `#${crypto.rank} ${crypto.name} (${crypto.symbol}) - ${formatPrice(crypto.price)}`;
+                    option.dataset.crypto = JSON.stringify(crypto);
+                    select.appendChild(option);
+                });
+
+                if (filtered.length === 0) {
+                    select.innerHTML = '<option value="">❌ Aucun résultat</option>';
+                }
+            });
+
+            select.addEventListener('change', (e) => {
+                if (e.target.value) {
+                    const cryptoData = JSON.parse(e.target.options[e.target.selectedIndex].dataset.crypto);
+                    selectedCrypto = cryptoData;
+                    displaySelectedCryptoInfo(cryptoData);
+                } else {
+                    selectedCrypto = null;
+                    document.getElementById('selectedCryptoInfo').innerHTML = '';
+                }
+            });
+        });
+
+        // Afficher les infos de la crypto sélectionnée
+        function displaySelectedCryptoInfo(crypto) {
+            const infoDiv = document.getElementById('selectedCryptoInfo');
+            const changeClass = crypto.price_change_24h >= 0 ? 'positive' : 'negative';
+            
+            infoDiv.innerHTML = `
+                <div class="crypto-info">
+                    <img src="${crypto.image}" alt="${crypto.name}" class="crypto-icon">
+                    <div style="flex: 1;">
+                        <div style="font-size: 1.3em; font-weight: 600; margin-bottom: 5px;">${crypto.name}</div>
+                        <div style="color: #94a3b8; font-size: 0.95em;">Rang #${crypto.rank} • ${crypto.symbol}</div>
+                    </div>
+                    <div style="display: flex; gap: 20px;">
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.85em; color: #94a3b8; margin-bottom: 3px;">Prix Actuel</div>
+                            <div style="font-size: 1.1em; font-weight: 600;">${formatPrice(crypto.price)}</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.85em; color: #94a3b8; margin-bottom: 3px;">24h</div>
+                            <div style="font-size: 1.1em; font-weight: 600;" class="${changeClass}">${formatPercent(crypto.price_change_24h)}</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.85em; color: #94a3b8; margin-bottom: 3px;">Market Cap</div>
+                            <div style="font-size: 1.1em; font-weight: 600;">$${formatNumber(crypto.market_cap)}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Charger la prédiction
+        async function loadPrediction() {
+            const select = document.getElementById('cryptoSelect');
+            const coinId = select.value;
+
+            if (!coinId) {
+                alert('⚠️ Veuillez sélectionner une cryptomonnaie');
+                return;
+            }
+
+            const content = document.getElementById('content');
+            const btn = document.getElementById('predictBtn');
+
+            btn.disabled = true;
+            btn.textContent = '⏳ Analyse en cours...';
+
+            content.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <h3>🤖 Intelligence Artificielle en action...</h3>
+                    <p>Collecte des données et entraînement du modèle</p>
+                    <p style="margin-top: 10px; color: #64748b; font-size: 0.9em;">
+                        Cela peut prendre 30-60 secondes
+                    </p>
+                </div>
+            `;
+
+            try {
+                console.log(`🔮 Prédiction pour: ${coinId}`);
+                const response = await fetch(`${API_URL}/api/predict/${coinId}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.message);
+                }
+
+                alert('✅ Prédiction générée! (Affichage à implémenter)');
+                content.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+
+            } catch (error) {
+                content.innerHTML = `
+                    <div class="error">
+                        <div class="error-icon">❌</div>
+                        <div style="font-size: 1.2em; margin-bottom: 10px;">Erreur lors de la prédiction</div>
+                        <div style="color: #94a3b8; font-size: 0.9em;">${error.message}</div>
+                    </div>
+                `;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔮 Prédire';
+            }
+        }
+
+        // Initialisation
+        async function init() {
+            await loadCryptoList();
+        }
+
+        // Vérifier le statut toutes les 30 secondes
+        setInterval(checkApiStatus, 30000);
+    </script>
+</body>
+</html>
