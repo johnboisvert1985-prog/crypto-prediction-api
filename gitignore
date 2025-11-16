@@ -1,34 +1,31 @@
-# Dépendances Node.js
+# Dependencies
 node_modules/
-package-lock.json
-
-# Environnement Python
 venv/
-env/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
 
-# Fichiers de données
+# Environment
+.env
+.env.local
+
+# Data files
 market_data.csv
 *.csv
-
-# Variables d'environnement
-.env
-
-# Logs
-*.log
-logs/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Build
+dist/
+build/
