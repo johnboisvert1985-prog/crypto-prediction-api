@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+import os
 
 def collect_market_data():
     """
@@ -20,12 +21,26 @@ def collect_market_data():
         'interval': 'daily'
     }
     
+    # Ajouter la clé API si disponible
+    headers = {}
+    api_key = os.environ.get('COINGECKO_API_KEY')
+    if api_key:
+        headers['x-cg-demo-api-key'] = api_key
+        print(f"🔑 Utilisation de la clé API CoinGecko")
+    else:
+        print(f"⚠️  Pas de clé API - utilisation de l'API gratuite (limites: 30 appels/min)")
+    
     print(f"📊 Collecte des données {coin_id} pour les {days} derniers jours...")
     
     try:
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, headers=headers, timeout=30)
         response.raise_for_status()
         data = response.json()
+        
+        # Vérifier si on a bien reçu des données
+        if 'prices' not in data or 'total_volumes' not in data:
+            print(f"❌ Erreur: Réponse API invalide")
+            return None
         
         # Extraction des prix et volumes
         prices = data['prices']
@@ -53,6 +68,14 @@ def collect_market_data():
         
         return df
         
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 429:
+            print(f"❌ Erreur 429: Trop de requêtes à l'API CoinGecko")
+            print(f"💡 Solution 1: Attendez 2-3 minutes et réessayez")
+            print(f"💡 Solution 2: Obtenez une clé API gratuite sur https://www.coingecko.com/en/api/pricing")
+        else:
+            print(f"❌ Erreur HTTP {e.response.status_code}: {e}")
+        return None
     except requests.exceptions.RequestException as e:
         print(f"❌ Erreur lors de la collecte des données: {e}")
         return None
