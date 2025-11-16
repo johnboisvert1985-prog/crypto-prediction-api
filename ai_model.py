@@ -1,186 +1,253 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Modèle IA de prédiction crypto - V2
+Utilise Linear Regression (méthode CoinGecko)
+"""
+
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error, r2_score
-from datetime import datetime, timedelta
 import json
-import requests
+import sys
+import glob
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from datetime import datetime
 
-def get_current_market_data(coin_id='bitcoin'):
+def load_data():
     """
-    Récupère les données actuelles du marché depuis CoinGecko
+    Charge les données collectées
     """
+    # Trouver le fichier de données le plus récent
+    data_files = glob.glob("data_*.csv")
+    
+    if not data_files:
+        raise Exception("Aucun fichier de données trouvé")
+    
+    # Utiliser le fichier le plus récent
+    latest_file = max(data_files, key=lambda x: x)
+    
+    print(f"📂 Chargement: {latest_file}")
+    df = pd.read_csv(latest_file)
+    
+    # Charger aussi les infos latest
+    coin_id = latest_file.replace("data_", "").replace(".csv", "")
+    latest_file_json = f"latest_{coin_id}.json"
+    
+    latest_info = {}
     try:
-        url = f'https://api.coingecko.com/api/v3/coins/{coin_id}'
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        
-        market_data = {
-            'current_price': data['market_data']['current_price']['usd'],
-            'high_24h': data['market_data']['high_24h']['usd'],
-            'low_24h': data['market_data']['low_24h']['usd'],
-            'price_change_percent': data['market_data']['price_change_percentage_24h'],
-            'volume_24h': data['market_data']['total_volume']['usd'],
-            'volume_change_percent': data['market_data']['total_volume'].get('usd_24h_change', 0),
-            'market_cap': data['market_data']['market_cap']['usd']
-        }
-        
-        return market_data
-    except Exception as e:
-        print(f"⚠️ Erreur lors de la récupération des données actuelles: {e}")
-        return None
+        with open(latest_file_json, 'r') as f:
+            latest_info = json.load(f)
+    except:
+        pass
+    
+    print(f"✅ {len(df)} lignes chargées")
+    
+    return df, latest_info
 
-def train_and_predict():
+def prepare_features(df):
     """
-    Entraîne le modèle IA et fait la prédiction
+    Prépare les features pour le modèle
     """
-    print("\n🤖 Démarrage de l'entraînement du modèle IA...")
+    print("🔧 Préparation des features...")
     
-    # 1. Charger les données
-    try:
-        df = pd.read_csv('market_data.csv')
-        print(f"✅ Données chargées: {len(df)} jours d'historique")
-    except FileNotFoundError:
-        print("❌ Fichier market_data.csv non trouvé")
-        return None
+    # Features à utiliser (selon CoinGecko)
+    feature_columns = [
+        'open', 'high', 'low', 'close',
+        'open_close', 'high_low',
+        'ma_7', 'ma_14',
+        'volatility', 'price_ratio',
+        'momentum', 'range_ratio'
+    ]
     
-    # 2. Préparation des features (caractéristiques)
-    df['day'] = range(len(df))  # Numéro du jour comme feature
+    # Vérifier que toutes les colonnes existent
+    available_features = [col for col in feature_columns if col in df.columns]
     
-    # Features avancées
-    df['price_ma_7'] = df['price'].rolling(window=7).mean()  # Moyenne mobile 7 jours
-    df['price_ma_30'] = df['price'].rolling(window=30).mean()  # Moyenne mobile 30 jours
-    df['volume_ma_7'] = df['volume'].rolling(window=7).mean()  # Volume moyen 7 jours
-    df['price_change'] = df['price'].pct_change()  # Variation quotidienne
-    df['volatility'] = df['price'].rolling(window=7).std()  # Volatilité sur 7 jours
+    if len(available_features) < 6:
+        raise Exception(f"Pas assez de features disponibles: {available_features}")
     
-    # Supprimer les NaN créés par rolling
-    df = df.dropna()
+    X = df[available_features].copy()
     
-    # Features (X) et Target (y)
-    features = ['day', 'volume', 'price_ma_7', 'price_ma_30', 'volume_ma_7', 'volatility']
-    X = df[features]
-    y = df['price']
+    # Target: prix du jour suivant
+    # On utilise le dernier prix connu comme "future price"
+    y = df['close'].shift(-1)
     
-    print(f"📊 Features utilisées: {features}")
+    # Supprimer la dernière ligne (pas de target)
+    X = X[:-1]
+    y = y[:-1]
     
-    # 3. Division train/test (80% train, 20% test)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, shuffle=False
-    )
+    # Supprimer les NaN
+    mask = ~(X.isna().any(axis=1) | y.isna())
+    X = X[mask]
+    y = y[mask]
     
-    print(f"🎯 Données d'entraînement: {len(X_train)} jours")
-    print(f"🧪 Données de test: {len(X_test)} jours")
+    if len(X) < 7:
+        raise Exception("Pas assez de données après nettoyage")
     
-    # 4. Entraînement du modèle
+    print(f"✅ Features préparées: {len(X)} samples, {len(X.columns)} features")
+    
+    return X, y, available_features
+
+def train_model(X, y):
+    """
+    Entraîne le modèle Linear Regression
+    """
+    print("🤖 Entraînement du modèle...")
+    
+    # Split train/test (80/20) - SANS shuffle pour time series
+    test_size = max(int(len(X) * 0.2), 1)
+    X_train = X[:-test_size]
+    X_test = X[-test_size:]
+    y_train = y[:-test_size]
+    y_test = y[-test_size:]
+    
+    print(f"Train: {len(X_train)} samples | Test: {len(X_test)} samples")
+    
+    # Normalisation (IMPORTANT!)
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # Modèle Linear Regression (simple et efficace)
     model = LinearRegression()
-    model.fit(X_train, y_train)
-    print("✅ Modèle entraîné avec succès!")
+    model.fit(X_train_scaled, y_train)
     
-    # 5. Évaluation du modèle
-    y_pred = model.predict(X_test)
-    mse = mean_squared_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
+    # Prédictions
+    y_train_pred = model.predict(X_train_scaled)
+    y_test_pred = model.predict(X_test_scaled)
     
-    print(f"\n📈 Métriques du modèle:")
-    print(f"   • MSE (Mean Squared Error): {mse:,.2f}")
-    print(f"   • R² Score: {r2:.4f} ({r2*100:.2f}%)")
+    # Métriques
+    train_r2 = r2_score(y_train, y_train_pred)
+    test_r2 = r2_score(y_test, y_test_pred)
+    train_mse = mean_squared_error(y_train, y_train_pred)
+    test_mse = mean_squared_error(y_test, y_test_pred)
+    train_mae = mean_absolute_error(y_train, y_train_pred)
+    test_mae = mean_absolute_error(y_test, y_test_pred)
     
-    # 6. Prédiction pour dans 7 jours
-    last_day = df['day'].iloc[-1]
-    future_day = last_day + 7
+    metrics = {
+        'train_r2': float(train_r2),
+        'test_r2': float(test_r2),
+        'train_mse': float(train_mse),
+        'test_mse': float(test_mse),
+        'train_mae': float(train_mae),
+        'test_mae': float(test_mae)
+    }
     
-    # Créer les features pour la prédiction
-    last_volume = df['volume'].iloc[-1]
-    last_price_ma_7 = df['price_ma_7'].iloc[-1]
-    last_price_ma_30 = df['price_ma_30'].iloc[-1]
-    last_volume_ma_7 = df['volume_ma_7'].iloc[-1]
-    last_volatility = df['volatility'].iloc[-1]
+    print(f"📊 R² Score (train): {train_r2:.4f}")
+    print(f"📊 R² Score (test): {test_r2:.4f}")
+    print(f"📊 MAE (test): ${test_mae:.2f}")
     
-    future_features = pd.DataFrame({
-        'day': [future_day],
-        'volume': [last_volume],
-        'price_ma_7': [last_price_ma_7],
-        'price_ma_30': [last_price_ma_30],
-        'volume_ma_7': [last_volume_ma_7],
-        'volatility': [last_volatility]
-    })
+    return model, scaler, metrics
+
+def make_prediction(model, scaler, X, latest_info):
+    """
+    Fait une prédiction sur le dernier point de données
+    """
+    print("🔮 Génération de la prédiction...")
     
-    predicted_price = model.predict(future_features)[0]
-    current_price = df['price'].iloc[-1]
+    # Utiliser la dernière ligne pour prédire
+    X_latest = X.iloc[-1:].copy()
+    X_latest_scaled = scaler.transform(X_latest)
+    
+    # Prédiction
+    predicted_price = model.predict(X_latest_scaled)[0]
+    
+    # Prix actuel
+    current_price = latest_info.get('latest_close', X['close'].iloc[-1])
+    
+    # Calculs
     price_change = ((predicted_price - current_price) / current_price) * 100
     
-    print(f"\n🔮 Prédiction:")
-    print(f"   • Prix actuel: ${current_price:,.2f}")
-    print(f"   • Prix prédit (7 jours): ${predicted_price:,.2f}")
-    print(f"   • Variation: {price_change:+.2f}%")
-    
-    # 7. Déterminer le signal de trading
+    # Signal de trading
     if price_change > 5:
         signal = "ACHETER"
     elif price_change < -5:
         signal = "VENDRE"
     else:
-        signal = "HOLD"
+        signal = "ATTENDRE"
     
-    print(f"   • Signal: {signal}")
-    
-    # 8. Récupérer les données actuelles du marché
-    coin_id = 'bitcoin'  # Par défaut, mais sera remplacé par le coin_id réel
-    market_data = get_current_market_data(coin_id)
-    
-    if market_data is None:
-        # Utiliser les données du CSV si l'API échoue
-        market_data = {
-            'current_price': current_price,
-            'high_24h': df['price'].iloc[-1],
-            'low_24h': df['price'].iloc[-1],
-            'price_change_percent': 0,
-            'volume_24h': df['volume'].iloc[-1],
-            'volume_change_percent': 0,
-            'market_cap': 0
-        }
-    
-    # 9. Préparer le résultat JSON
-    result = {
-        "coin": coin_id,
-        "current_price": float(market_data['current_price']),
-        "predicted_price": float(predicted_price),
-        "price_change": float(price_change),
-        "signal": signal,
-        "model_metrics": {
-            "mse": float(mse),
-            "r2_score": float(r2)
-        },
-        "market_data": {
-            "high_24h": float(market_data['high_24h']),
-            "low_24h": float(market_data['low_24h']),
-            "price_change_percent": float(market_data['price_change_percent']),
-            "volume_24h": float(market_data['volume_24h']),
-            "volume_change_percent": float(market_data.get('volume_change_percent', 0)),
-            "market_cap": float(market_data['market_cap'])
-        },
-        "timestamp": datetime.now().isoformat()
+    # Données du marché
+    market_data = {
+        'high_24h': float(latest_info.get('latest_high', current_price * 1.02)),
+        'low_24h': float(latest_info.get('latest_low', current_price * 0.98)),
+        'price_change_percent': float(price_change),
+        'volume_24h': 0.0,  # Pas disponible dans ce dataset
+        'volume_change_percent': 0.0,
+        'market_cap': 0.0
     }
     
-    return result
+    prediction = {
+        'coin': latest_info.get('coin_id', 'unknown'),
+        'current_price': float(current_price),
+        'predicted_price': float(predicted_price),
+        'price_change': float(price_change),
+        'signal': signal,
+        'market_data': market_data,
+        'timestamp': datetime.now().isoformat()
+    }
+    
+    print(f"💰 Prix actuel: ${current_price:,.2f}")
+    print(f"🎯 Prix prédit: ${predicted_price:,.2f}")
+    print(f"📊 Changement: {price_change:+.2f}%")
+    print(f"🚦 Signal: {signal}")
+    
+    return prediction
+
+def main():
+    print("=" * 60)
+    print("🤖 MODÈLE IA V2 - LINEAR REGRESSION")
+    print("=" * 60)
+    print()
+    
+    try:
+        # 1. Charger les données
+        df, latest_info = load_data()
+        
+        # 2. Préparer les features
+        X, y, feature_names = prepare_features(df)
+        
+        # 3. Entraîner le modèle
+        model, scaler, metrics = train_model(X, y)
+        
+        # 4. Faire la prédiction
+        prediction = make_prediction(model, scaler, X, latest_info)
+        
+        # 5. Ajouter les métriques
+        prediction['model_metrics'] = {
+            'r2_score': metrics['test_r2'],
+            'mse': metrics['test_mse'],
+            'mae': metrics['test_mae']
+        }
+        
+        print()
+        print("=" * 60)
+        print("✅ PRÉDICTION TERMINÉE")
+        print("=" * 60)
+        print()
+        
+        # Output JSON pour Node.js
+        print(json.dumps(prediction, indent=2))
+        
+        sys.exit(0)
+        
+    except Exception as e:
+        print()
+        print("=" * 60)
+        print("❌ ERREUR")
+        print("=" * 60)
+        print(f"Erreur: {str(e)}")
+        
+        # Output d'erreur en JSON
+        error_output = {
+            'error': True,
+            'message': str(e),
+            'timestamp': datetime.now().isoformat()
+        }
+        print(json.dumps(error_output))
+        
+        sys.exit(1)
 
 if __name__ == "__main__":
-    print(f"\n{'='*60}")
-    print("🧠 MODÈLE IA DE PRÉDICTION CRYPTO")
-    print(f"{'='*60}")
-    
-    result = train_and_predict()
-    
-    if result:
-        print(f"\n{'='*60}")
-        print("✅ PRÉDICTION TERMINÉE")
-        print(f"{'='*60}\n")
-        
-        # Afficher le résultat JSON
-        print(json.dumps(result, indent=2))
-    else:
-        print("\n❌ Échec de la prédiction")
-        exit(1)
+    main()
