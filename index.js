@@ -16,7 +16,7 @@ let cryptoListCache = null;
 let cacheTimestamp = null;
 const CACHE_DURATION = 60 * 60 * 1000; // 1 heure
 
-// Endpoint pour obtenir la liste des TOP 1000 cryptos
+// Endpoint pour obtenir la liste des TOP 500 cryptos
 app.get('/api/crypto-list', async (req, res) => {
     try {
         // Vérifier le cache
@@ -25,18 +25,18 @@ app.get('/api/crypto-list', async (req, res) => {
             return res.json(cryptoListCache);
         }
 
-        console.log('🔄 Récupération de la liste des TOP 1000 cryptos...');
+        console.log('🔄 Récupération de la liste des TOP 500 cryptos...');
         
         const fetch = (await import('node-fetch')).default;
         
-        // Récupérer le TOP 1000 en plusieurs pages (250 par page)
-       const pages = 2; // 2 pages × 250 = 500 cryptos (au lieu de 4)
+        // Récupérer le TOP 500 en plusieurs pages (250 par page)
+        const pages = 2; // 2 pages × 250 = 500 cryptos
         let allCryptos = [];
         
         for (let page = 1; page <= pages; page++) {
             const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}&sparkline=false`;
             
-            console.log(`📡 Requête page ${page}/4...`);
+            console.log(`📡 Requête page ${page}/${pages}...`);
             const response = await fetch(url);
             
             if (!response.ok) {
@@ -49,7 +49,7 @@ app.get('/api/crypto-list', async (req, res) => {
             const data = await response.json();
             allCryptos = allCryptos.concat(data);
             
-            console.log(`✅ Page ${page}/4 récupérée (${data.length} cryptos)`);
+            console.log(`✅ Page ${page}/${pages} récupérée (${data.length} cryptos)`);
             
             // Pause de 3 secondes entre les requêtes pour respecter les limites
             if (page < pages) {
@@ -191,6 +191,6 @@ app.listen(PORT, () => {
     console.log(`🚀 Serveur de prédiction crypto IA démarré!`);
     console.log(`📡 Port: ${PORT}`);
     console.log(`🌐 http://localhost:${PORT}`);
-    console.log(`💹 Support: TOP 1000 cryptomonnaies`);
+    console.log(`💹 Support: TOP 500 cryptomonnaies`);
     console.log(`${'='.repeat(60)}\n`);
 });
