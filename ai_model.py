@@ -6,13 +6,17 @@ from sklearn.metrics import mean_squared_error, r2_score
 import json
 import sys
 
-def load_and_prepare_data():
+def load_and_prepare_data(coin_id='bitcoin'):
     """
     Charge les données du CSV et prépare les features
+    
+    Args:
+        coin_id (str): ID de la crypto
     """
     try:
-        # Lecture du fichier CSV
-        df = pd.read_csv('market_data.csv')
+        # Lecture du fichier CSV spécifique à la crypto
+        filename = f'market_data_{coin_id}.csv'
+        df = pd.read_csv(filename)
         
         # Feature Engineering: Créer des features à partir des prix et volumes précédents
         df['prev_price'] = df['price'].shift(1)
@@ -27,7 +31,7 @@ def load_and_prepare_data():
         
     except FileNotFoundError:
         print(json.dumps({
-            "error": "Fichier market_data.csv introuvable. Exécutez d'abord collect_data.py"
+            "error": f"Fichier {filename} introuvable. Exécutez d'abord collect_data.py pour {coin_id}"
         }))
         sys.exit(1)
     except Exception as e:
@@ -56,12 +60,19 @@ def train_model(df):
     
     return model, mse, r2, X_test, y_test, y_pred
 
-def predict_price(latest_price, latest_volume, price_change, volume_change):
+def predict_price(coin_id, latest_price, latest_volume, price_change, volume_change):
     """
     Fait une prédiction basée sur les dernières données
+    
+    Args:
+        coin_id (str): ID de la crypto
+        latest_price (float): Prix actuel
+        latest_volume (float): Volume actuel
+        price_change (float): Changement de prix (décimal)
+        volume_change (float): Changement de volume (décimal)
     """
     # Charger et préparer les données
-    df = load_and_prepare_data()
+    df = load_and_prepare_data(coin_id)
     
     # Entraîner le modèle
     model, mse, r2, _, _, _ = train_model(df)
@@ -72,6 +83,7 @@ def predict_price(latest_price, latest_volume, price_change, volume_change):
     
     # Retourner le résultat en JSON
     result = {
+        "coin_id": coin_id,
         "current_price": latest_price,
         "predicted_price": predicted_price,
         "price_change_pct": ((predicted_price - latest_price) / latest_price) * 100,
@@ -83,60 +95,19 @@ def predict_price(latest_price, latest_volume, price_change, volume_change):
     
     return result
 
-def main():
-    """
-    Fonction principale pour entraîner et évaluer le modèle
-    """
-    print("🤖 Chargement des données...")
-    df = load_and_prepare_data()
-    
-    print(f"📊 Données chargées: {len(df)} points")
-    
-    print("\n🧠 Entraînement du modèle de régression linéaire...")
-    model, mse, r2, X_test, y_test, y_pred = train_model(df)
-    
-    print(f"\n📈 Résultats du modèle:")
-    print(f"   - MSE (Mean Squared Error): ${mse:,.2f}")
-    print(f"   - R² Score: {r2:.4f}")
-    print(f"   - Précision: {r2*100:.2f}%")
-    
-    # Prédiction avec les dernières données
-    latest_data = df.iloc[-1]
-    
-    print(f"\n🔮 Prédiction basée sur les dernières données:")
-    print(f"   - Prix actuel: ${latest_data['price']:,.2f}")
-    print(f"   - Volume actuel: ${latest_data['volume']:,.0f}")
-    
-    prediction = predict_price(
-        latest_data['prev_price'],
-        latest_data['prev_volume'],
-        latest_data['price_change'],
-        latest_data['volume_change']
-    )
-    
-    print(f"\n💡 Prédiction du prochain prix: ${prediction['predicted_price']:,.2f}")
-    print(f"   - Changement prédit: {prediction['price_change_pct']:+.2f}%")
-    
-    if prediction['price_change_pct'] > 1:
-        print(f"   - Signal: 🟢 ACHAT (hausse prédite > 1%)")
-    elif prediction['price_change_pct'] < -1:
-        print(f"   - Signal: 🔴 VENTE (baisse prédite > 1%)")
-    else:
-        print(f"   - Signal: 🟡 HOLD (mouvement < 1%)")
-
 if __name__ == "__main__":
     # Si des arguments sont passés (pour l'API)
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 5:
         try:
-            latest_price = float(sys.argv[1])
-            latest_volume = float(sys.argv[2])
-            price_change = float(sys.argv[3])
-            volume_change = float(sys.argv[4])
+            coin_id = sys.argv[1]
+            latest_price = float(sys.argv[2])
+            latest_volume = float(sys.argv[3])
+            price_change = float(sys.argv[4])
+            volume_change = float(sys.argv[5])
             
-            result = predict_price(latest_price, latest_volume, price_change, volume_change)
+            result = predict_price(coin_id, latest_price, latest_volume, price_change, volume_change)
             print(json.dumps(result))
         except Exception as e:
             print(json.dumps({"error": str(e)}))
     else:
-        # Mode interactif
-        main()
+        print(json.dumps({"error": "Usage: python ai_model.py <coin_id> <price> <volume> <price_change> <volume_change>"}))
