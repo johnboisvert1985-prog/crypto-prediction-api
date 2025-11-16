@@ -1,19 +1,14 @@
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
-import os
 import sys
+from datetime import datetime
 
 def collect_market_data(coin_id='bitcoin'):
     """
-    Collecte 30 jours de données historiques depuis CoinGecko API
-    
-    Args:
-        coin_id (str): ID de la crypto sur CoinGecko (ex: 'bitcoin', 'ethereum')
+    Collecte 90 jours de données historiques pour n'importe quelle crypto depuis CoinGecko API
     """
-    # Configuration
     vs_currency = 'usd'
-    days = '30'
+    days = '90'  # 90 jours pour plus de données d'entraînement
     
     # URL de l'API CoinGecko pour les données de marché
     url = f'https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart'
@@ -24,30 +19,17 @@ def collect_market_data(coin_id='bitcoin'):
         'interval': 'daily'
     }
     
-    # Ajouter la clé API si disponible
-    headers = {}
-    api_key = os.environ.get('COINGECKO_API_KEY')
-    if api_key:
-        headers['x-cg-demo-api-key'] = api_key
-        print(f"🔑 Utilisation de la clé API CoinGecko")
-    else:
-        print(f"⚠️  Pas de clé API - utilisation de l'API gratuite (limites: 30 appels/min)")
-    
-    print(f"📊 Collecte des données {coin_id.upper()} pour les {days} derniers jours...")
+    print(f"📊 Collecte des données {coin_id} pour les {days} derniers jours...")
     
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=30)
+        response = requests.get(url, params=params)
         response.raise_for_status()
         data = response.json()
-        
-        # Vérifier si on a bien reçu des données
-        if 'prices' not in data or 'total_volumes' not in data:
-            print(f"❌ Erreur: Réponse API invalide pour {coin_id}")
-            return None
         
         # Extraction des prix et volumes
         prices = data['prices']
         volumes = data['total_volumes']
+        market_caps = data.get('market_caps', [])
         
         # Création du DataFrame
         df_prices = pd.DataFrame(prices, columns=['timestamp', 'price'])
@@ -60,37 +42,45 @@ def collect_market_data(coin_id='bitcoin'):
         # Fusion des données
         df = pd.merge(df_prices, df_volumes, on='timestamp')
         
-        # Nom du fichier basé sur la crypto
-        filename = f'market_data_{coin_id}.csv'
-        df.to_csv(filename, index=False)
+        # Ajouter market cap si disponible
+        if market_caps:
+            df_market_caps = pd.DataFrame(market_caps, columns=['timestamp', 'market_cap'])
+            df_market_caps['timestamp'] = pd.to_datetime(df_market_caps['timestamp'], unit='ms')
+            df = pd.merge(df, df_market_caps, on='timestamp', how='left')
         
-        print(f"✅ Données {coin_id.upper()} collectées avec succès!")
-        print(f"📈 Nombre de points de données: {len(df)}")
-        print(f"💰 Prix actuel: ${df['price'].iloc[-1]:,.2f}")
-        print(f"📊 Volume 24h: ${df['volume'].iloc[-1]:,.0f}")
-        print(f"📁 Données sauvegardées dans: {filename}")
+        # Sauvegarde en CSV
+        df.to_csv('market_data.csv', index=False)
         
-        return df
+        print(f"✅ Données collectées avec succès!")
+        print(f"📈 Nombre de jours: {len(df)}")
+        print(f"💰 Prix le plus récent: ${df['price'].iloc[-1]:,.2f}")
+        print(f"📊 Volume moyen 24h: ${df['volume'].mean():,.0f}")
+        print(f"📁 Fichier sauvegardé: market_data.csv")
         
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 429:
-            print(f"❌ Erreur 429: Trop de requêtes à l'API CoinGecko")
-            print(f"💡 Solution 1: Attendez 2-3 minutes et réessayez")
-            print(f"💡 Solution 2: Obtenez une clé API gratuite sur https://www.coingecko.com/en/api/pricing")
-        elif e.response.status_code == 404:
-            print(f"❌ Erreur 404: Crypto '{coin_id}' introuvable sur CoinGecko")
-            print(f"💡 Vérifiez l'ID de la crypto sur https://www.coingecko.com/")
-        else:
-            print(f"❌ Erreur HTTP {e.response.status_code}: {e}")
-        return None
+        return True
+        
     except requests.exceptions.RequestException as e:
-        print(f"❌ Erreur lors de la collecte des données: {e}")
-        return None
+        print(f"❌ Erreur lors de la requête API: {e}")
+        return False
+    except KeyError as e:
+        print(f"❌ Erreur: Données manquantes dans la réponse API: {e}")
+        return False
     except Exception as e:
         print(f"❌ Erreur inattendue: {e}")
-        return None
+        return False
 
 if __name__ == "__main__":
-    # Récupérer le coin_id depuis les arguments ou utiliser bitcoin par défaut
+    # Récupérer le coin_id depuis les arguments de ligne de commande
     coin_id = sys.argv[1] if len(sys.argv) > 1 else 'bitcoin'
-    collect_market_data(coin_id)
+    
+    print(f"\n{'='*60}")
+    print(f"🚀 Collecte de données pour: {coin_id.upper()}")
+    print(f"{'='*60}\n")
+    
+    success = collect_market_data(coin_id)
+    
+    if success:
+        print(f"\n✅ Collecte terminée avec succès!")
+    else:
+        print(f"\n❌ Échec de la collecte")
+        sys.exit(1)
