@@ -12,12 +12,24 @@ app.use(express.json());
 // Configuration de l'API CoinGecko
 const COINGECKO_API = 'https://api.coingecko.com/api/v3';
 const COIN_ID = 'bitcoin';
+const API_KEY = process.env.COINGECKO_API_KEY;
+
+// Headers avec clé API si disponible
+function getHeaders() {
+    const headers = {};
+    if (API_KEY) {
+        headers['x-cg-demo-api-key'] = API_KEY;
+    }
+    return headers;
+}
 
 /**
  * Récupère les données actuelles de Bitcoin depuis CoinGecko
  */
 async function getCurrentBitcoinData() {
     try {
+        const headers = getHeaders();
+
         // Récupération du prix et volume actuels
         const simplePrice = axios.get(`${COINGECKO_API}/simple/price`, {
             params: {
@@ -25,7 +37,8 @@ async function getCurrentBitcoinData() {
                 vs_currencies: 'usd',
                 include_24hr_vol: true,
                 include_24hr_change: true
-            }
+            },
+            headers: headers
         });
 
         // Récupération des données de marché détaillées
@@ -34,7 +47,8 @@ async function getCurrentBitcoinData() {
                 vs_currency: 'usd',
                 days: '2',
                 interval: 'daily'
-            }
+            },
+            headers: headers
         });
 
         const [priceResponse, chartResponse] = await Promise.all([simplePrice, marketData]);
@@ -57,6 +71,9 @@ async function getCurrentBitcoinData() {
         };
     } catch (error) {
         console.error('Erreur lors de la récupération des données:', error.message);
+        if (error.response && error.response.status === 429) {
+            throw new Error('Limite de taux API CoinGecko atteinte. Veuillez patienter ou ajouter une clé API.');
+        }
         throw new Error('Impossible de récupérer les données de marché');
     }
 }
@@ -103,10 +120,17 @@ function callPythonModel(currentPrice, volume, priceChange, volumeChange) {
 app.get('/', (req, res) => {
     res.json({
         message: '🚀 API de Prédiction Crypto avec IA',
+        status: 'En ligne',
+        api_key_configured: !!API_KEY,
         endpoints: {
             '/predict_price': 'GET - Obtenir la prédiction de prix Bitcoin',
             '/health': 'GET - Vérifier l\'état du serveur',
             '/collect_data': 'POST - Collecter les données historiques'
+        },
+        info: {
+            coin: 'Bitcoin (BTC)',
+            model: 'Régression Linéaire',
+            data_period: '30 jours'
         },
         author: 'Système de Trading Automatisé'
     });
@@ -118,7 +142,9 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
-        timestamp: new Date().toISOString()
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        api_key_configured: !!API_KEY
     });
 });
 
@@ -189,7 +215,10 @@ app.get('/predict_price', async (req, res) => {
         res.status(500).json({
             error: 'Erreur lors de la génération de la prédiction',
             message: error.message,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            help: error.message.includes('Limite de taux') 
+                ? 'Obtenez une clé API gratuite sur https://www.coingecko.com/en/api/pricing'
+                : 'Vérifiez que les données ont été collectées avec /collect_data'
         });
     }
 });
@@ -200,16 +229,24 @@ app.get('/predict_price', async (req, res) => {
 app.post('/collect_data', (req, res) => {
     const pythonScript = path.join(__dirname, 'collect_data.py');
     
+    console.log('📊 Démarrage de la collecte de données...');
+    
     execFile('python3', [pythonScript], (error, stdout, stderr) => {
         if (error) {
             console.error('Erreur:', error);
+            console.error('Stderr:', stderr);
             res.status(500).json({
+                success: false,
                 error: 'Erreur lors de la collecte des données',
-                message: stderr
+                message: stderr || error.message,
+                help: stderr.includes('429') 
+                    ? 'Limite API atteinte. Attendez 2-3 minutes ou ajoutez une clé API.'
+                    : 'Vérifiez les logs pour plus de détails'
             });
             return;
         }
 
+        console.log('✅ Collecte terminée');
         res.json({
             success: true,
             message: 'Données collectées avec succès',
@@ -226,6 +263,7 @@ app.listen(PORT, () => {
     console.log(`📡 Port: ${PORT}`);
     console.log(`🌐 URL: http://localhost:${PORT}`);
     console.log(`🔮 Prédiction: http://localhost:${PORT}/predict_price`);
+    console.log(`🔑 Clé API CoinGecko: ${API_KEY ? '✅ Configurée' : '⚠️  Non configurée (API gratuite)'}`);
     console.log('═══════════════════════════════════════════════════════');
     console.log('💡 Endpoints disponibles:');
     console.log('   GET  / - Page d\'accueil');
@@ -233,6 +271,14 @@ app.listen(PORT, () => {
     console.log('   GET  /health - État du serveur');
     console.log('   POST /collect_data - Collecter les données');
     console.log('═══════════════════════════════════════════════════════');
+    if (!API_KEY) {
+        console.log('⚠️  ATTENTION: Pas de clé API configurée');
+        console.log('   L\'API gratuite a des limites (30 appels/min)');
+        console.log('   Pour augmenter les limites:');
+        console.log('   1. Obtenez une clé gratuite sur https://www.coingecko.com/en/api/pricing');
+        console.log('   2. Ajoutez COINGECKO_API_KEY dans vos variables d\'environnement');
+        console.log('═══════════════════════════════════════════════════════');
+    }
 });
 
 // Gestion des erreurs non capturées
