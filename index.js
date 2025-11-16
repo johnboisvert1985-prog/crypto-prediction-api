@@ -30,7 +30,7 @@ app.get('/api/crypto-list', async (req, res) => {
         const fetch = (await import('node-fetch')).default;
         
         // Récupérer le TOP 1000 en plusieurs pages (250 par page)
-        const pages = 4; // 4 pages × 250 = 1000 cryptos
+       const pages = 2; // 2 pages × 250 = 500 cryptos (au lieu de 4)
         let allCryptos = [];
         
         for (let page = 1; page <= pages; page++) {
