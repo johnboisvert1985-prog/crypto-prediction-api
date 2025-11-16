@@ -12,6 +12,20 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(express.json());
 
+// ✅ ACTIVER CORS - IMPORTANT pour permettre les requêtes depuis le HTML local
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    
+    next();
+});
+
 // Configuration de l'API CoinGecko
 const COINGECKO_API = 'https://api.coingecko.com/api/v3';
 const COIN_ID = 'bitcoin';
@@ -169,6 +183,7 @@ app.get('/', (req, res) => {
         data_collected: isDataCollected,
         data_file_exists: dataFileExists(),
         api_key_configured: !!API_KEY,
+        cors_enabled: true,
         endpoints: {
             '/predict_price': 'GET - Obtenir la prédiction de prix Bitcoin',
             '/health': 'GET - Vérifier l\'état du serveur',
@@ -193,6 +208,7 @@ app.get('/status', (req, res) => {
         data_file_exists: dataFileExists(),
         is_collecting: isCollecting,
         api_key_configured: !!API_KEY,
+        cors_enabled: true,
         timestamp: new Date().toISOString()
     });
 });
@@ -206,7 +222,8 @@ app.get('/health', (req, res) => {
         uptime: process.uptime(),
         data_ready: isDataCollected && dataFileExists(),
         timestamp: new Date().toISOString(),
-        api_key_configured: !!API_KEY
+        api_key_configured: !!API_KEY,
+        cors_enabled: true
     });
 });
 
@@ -366,6 +383,7 @@ app.listen(PORT, async () => {
     console.log(`🌐 URL: http://localhost:${PORT}`);
     console.log(`🔮 Prédiction: http://localhost:${PORT}/predict_price`);
     console.log(`🔑 Clé API CoinGecko: ${API_KEY ? '✅ Configurée' : '⚠️  Non configurée (API gratuite)'}`);
+    console.log(`✅ CORS: Activé (requêtes depuis n'importe où)`);
     console.log('═══════════════════════════════════════════════════════');
     console.log('💡 Endpoints disponibles:');
     console.log('   GET  / - Page d\'accueil');
