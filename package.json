@@ -1,0 +1,32 @@
+{
+  "name": "crypto-price-prediction-ai",
+  "version": "1.0.0",
+  "description": "Système de prédiction de prix crypto avec IA utilisant l'API CoinGecko",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "collect": "python3 collect_data.py",
+    "train": "python3 ai_model.py"
+  },
+  "keywords": [
+    "crypto",
+    "bitcoin",
+    "prediction",
+    "ai",
+    "machine-learning",
+    "coingecko"
+  ],
+  "author": "Votre nom",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
