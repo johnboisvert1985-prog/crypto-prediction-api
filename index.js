@@ -36,8 +36,13 @@ app.get('/api/crypto-list', async (req, res) => {
         for (let page = 1; page <= pages; page++) {
             const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}&sparkline=false`;
             
+            console.log(`📡 Requête page ${page}/4...`);
             const response = await fetch(url);
+            
             if (!response.ok) {
+                if (response.status === 429) {
+                    throw new Error(`Rate limit CoinGecko atteint. Réessayez dans 1 minute.`);
+                }
                 throw new Error(`Erreur API CoinGecko: ${response.status}`);
             }
             
@@ -46,9 +51,10 @@ app.get('/api/crypto-list', async (req, res) => {
             
             console.log(`✅ Page ${page}/4 récupérée (${data.length} cryptos)`);
             
-            // Pause entre les requêtes pour respecter les limites de l'API
+            // Pause de 3 secondes entre les requêtes pour respecter les limites
             if (page < pages) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                console.log(`⏳ Pause de 3 secondes...`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
             }
         }
 
