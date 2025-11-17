@@ -11,12 +11,18 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Cache pour la liste des cryptos (rafraîchi toutes les heures)
+// Cache pour la liste des cryptos
 let cryptoListCache = null;
 let cacheTimestamp = null;
 const CACHE_DURATION = 60 * 60 * 1000; // 1 heure
 
-// Endpoint pour obtenir la liste des TOP 250 cryptos
+console.log(`\n${'='.repeat(60)}`);
+console.log(`🚀 SERVEUR DE PRÉDICTION CRYPTO V2.1`);
+console.log(`${'='.repeat(60)}\n`);
+
+// ============================================================================
+// ENDPOINT: Liste des TOP 250 cryptos
+// ============================================================================
 app.get('/api/crypto-list', async (req, res) => {
     try {
         // Vérifier le cache
@@ -25,35 +31,26 @@ app.get('/api/crypto-list', async (req, res) => {
             return res.json(cryptoListCache);
         }
 
-        console.log('🔄 Récupération de la liste des TOP 250 cryptos...');
+        console.log('📥 Récupération TOP 250 cryptos de CoinGecko...');
         
         const fetch = (await import('node-fetch')).default;
         
-        // Récupérer le TOP 250 (1 seule page)
-        const pages = 1; // 1 page × 250 = 250 cryptos
-        let allCryptos = [];
+        const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false`;
         
-        for (let page = 1; page <= pages; page++) {
-            const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}&sparkline=false`;
-            
-            console.log(`📡 Requête page ${page}/${pages}...`);
-            const response = await fetch(url);
-            
-            if (!response.ok) {
-                if (response.status === 429) {
-                    throw new Error(`Rate limit CoinGecko atteint. Réessayez dans 1 minute.`);
-                }
-                throw new Error(`Erreur API CoinGecko: ${response.status}`);
+        console.log('🔄 Requête vers CoinGecko (peut prendre 5-10s)...');
+        const response = await fetch(url, { timeout: 20000 });
+        
+        if (!response.ok) {
+            if (response.status === 429) {
+                throw new Error(`Rate limit CoinGecko. Réessayez dans 1 minute.`);
             }
-            
-            const data = await response.json();
-            allCryptos = allCryptos.concat(data);
-            
-            console.log(`✅ Page ${page}/${pages} récupérée (${data.length} cryptos)`);
+            throw new Error(`Erreur API CoinGecko: ${response.status}`);
         }
+        
+        const data = await response.json();
 
         // Formater la liste
-        const cryptoList = allCryptos.map((crypto, index) => ({
+        const cryptoList = data.map((crypto, index) => ({
             id: crypto.id,
             symbol: crypto.symbol.toUpperCase(),
             name: crypto.name,
@@ -72,121 +69,198 @@ app.get('/api/crypto-list', async (req, res) => {
         };
         cacheTimestamp = Date.now();
 
-        console.log(`✅ Liste TOP ${cryptoList.length} cryptos mise en cache`);
+        console.log(`✅ ${cryptoList.length} cryptos en cache`);
         res.json(cryptoListCache);
 
     } catch (error) {
-        console.error('❌ Erreur lors de la récupération de la liste:', error);
+        console.error('❌ Erreur:', error.message);
         res.status(500).json({
-            error: 'Erreur lors de la récupération de la liste des cryptomonnaies',
+            error: 'Erreur lors de la récupération de la liste',
             message: error.message
         });
     }
 });
 
-// Endpoint pour obtenir la prédiction - VERSION 2
+// ============================================================================
+// ENDPOINT: Prédiction
+// ============================================================================
 app.get('/api/predict/:coinId', async (req, res) => {
     const { coinId } = req.params;
+    const startTime = Date.now();
     
-    console.log(`\n🔮 Nouvelle demande de prédiction pour: ${coinId}`);
-    console.log('⏳ Collecte des données en cours...');
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📊 PRÉDICTION: ${coinId.toUpperCase()}`);
+    console.log(`${'='.repeat(60)}`);
+
+    let collectProcess = null;
+    let modelProcess = null;
 
     try {
-        // 1. Collecter les données avec le nouveau script V2
-        const collectData = spawn('python3', ['collect_data_v2.py', coinId]);
-        
-        let collectOutput = '';
-        let collectError = '';
-        
-        collectData.stdout.on('data', (data) => {
-            collectOutput += data.toString();
-            console.log(data.toString().trim());
-        });
-        
-        collectData.stderr.on('data', (data) => {
-            collectError += data.toString();
-            console.error(data.toString().trim());
-        });
+        // ====== ÉTAPE 1: COLLECTE DE DONNÉES ======
+        console.log(`\n📥 [1/2] COLLECTE DES DONNÉES`);
+        console.log(`⏱️  Timeout: 120 secondes`);
 
-        await new Promise((resolve, reject) => {
-            collectData.on('close', (code) => {
+        const collectOutput = await new Promise((resolve, reject) => {
+            collectProcess = spawn('python3', ['collect_data_v2.py', coinId], {
+                timeout: 120000  // 120 secondes
+            });
+            
+            let output = '';
+            let error = '';
+            
+            collectProcess.stdout.on('data', (data) => {
+                const text = data.toString().trim();
+                output += text + '\n';
+                if (text) console.log(`   ${text}`);
+            });
+            
+            collectProcess.stderr.on('data', (data) => {
+                const text = data.toString().trim();
+                error += text + '\n';
+                if (text) console.error(`   ❌ ${text}`);
+            });
+
+            const timeout = setTimeout(() => {
+                console.error('   ⏱️  TIMEOUT: La collecte a dépassé 120 secondes!');
+                collectProcess.kill('SIGTERM');
+                reject(new Error('Collecte timeout (>120s)'));
+            }, 125000);
+
+            collectProcess.on('close', (code) => {
+                clearTimeout(timeout);
                 if (code !== 0) {
-                    reject(new Error(`Erreur collecte données: ${collectError || 'Code ' + code}`));
+                    reject(new Error(`Collecte échouée (code ${code}): ${error}`));
                 } else {
-                    resolve();
+                    resolve(output);
                 }
+            });
+
+            collectProcess.on('error', (err) => {
+                clearTimeout(timeout);
+                reject(err);
             });
         });
 
-        console.log('✅ Données collectées avec succès');
-        console.log('🤖 Entraînement du modèle IA V2...');
+        console.log(`✅ Collecte réussie (${Date.now() - startTime}ms)`);
 
-        // 2. Entraîner le modèle et faire la prédiction avec V2
-        const runModel = spawn('python3', ['ai_model_v2.py']);
-        
-        let modelOutput = '';
-        let modelError = '';
-        
-        runModel.stdout.on('data', (data) => {
-            modelOutput += data.toString();
-            console.log(data.toString().trim());
-        });
-        
-        runModel.stderr.on('data', (data) => {
-            modelError += data.toString();
-            console.error(data.toString().trim());
-        });
+        // ====== ÉTAPE 2: ENTRAÎNEMENT ET PRÉDICTION ======
+        console.log(`\n🤖 [2/2] ENTRAÎNEMENT IA + PRÉDICTION`);
+        console.log(`⏱️  Timeout: 60 secondes`);
 
-        const result = await new Promise((resolve, reject) => {
-            runModel.on('close', (code) => {
+        const prediction = await new Promise((resolve, reject) => {
+            modelProcess = spawn('python3', ['ai_model_v2.py'], {
+                timeout: 60000  // 60 secondes
+            });
+            
+            let output = '';
+            let error = '';
+            
+            modelProcess.stdout.on('data', (data) => {
+                const text = data.toString().trim();
+                output += text + '\n';
+                if (text) console.log(`   ${text}`);
+            });
+            
+            modelProcess.stderr.on('data', (data) => {
+                const text = data.toString().trim();
+                error += text + '\n';
+                if (text) console.error(`   ❌ ${text}`);
+            });
+
+            const timeout = setTimeout(() => {
+                console.error('   ⏱️  TIMEOUT: Le modèle a dépassé 60 secondes!');
+                modelProcess.kill('SIGTERM');
+                reject(new Error('Modèle timeout (>60s)'));
+            }, 65000);
+
+            modelProcess.on('close', (code) => {
+                clearTimeout(timeout);
                 if (code !== 0) {
-                    reject(new Error(`Erreur modèle IA: ${modelError || 'Code ' + code}`));
+                    reject(new Error(`Modèle échoué (code ${code}): ${error}`));
                 } else {
                     try {
-                        // Extraire le JSON de la sortie
-                        const jsonMatch = modelOutput.match(/\{[\s\S]*\}/);
-                        if (jsonMatch) {
-                            const prediction = JSON.parse(jsonMatch[0]);
-                            resolve(prediction);
-                        } else {
-                            reject(new Error('Format de réponse invalide'));
+                        // Extraire le JSON
+                        const jsonMatch = output.match(/\{[\s\S]*\}/);
+                        if (!jsonMatch) {
+                            throw new Error('Aucun JSON trouvé en sortie');
                         }
+                        const result = JSON.parse(jsonMatch[0]);
+                        resolve(result);
                     } catch (e) {
                         reject(new Error(`Erreur parsing JSON: ${e.message}`));
                     }
                 }
             });
+
+            modelProcess.on('error', (err) => {
+                clearTimeout(timeout);
+                reject(err);
+            });
         });
 
-        console.log('✅ Prédiction générée avec succès');
-        res.json(result);
+        const totalTime = Date.now() - startTime;
+        console.log(`\n✅ PRÉDICTION RÉUSSIE en ${totalTime}ms`);
+        console.log(`${'='.repeat(60)}\n`);
+
+        res.json(prediction);
 
     } catch (error) {
-        console.error('❌ Erreur:', error.message);
+        const totalTime = Date.now() - startTime;
+        console.error(`\n❌ ERREUR: ${error.message}`);
+        console.error(`Temps écoulé: ${totalTime}ms`);
+        console.log(`${'='.repeat(60)}\n`);
+
+        // Tuer les process si encore actifs
+        if (collectProcess) collectProcess.kill();
+        if (modelProcess) modelProcess.kill();
+
         res.status(500).json({
             error: 'Erreur lors de la prédiction',
-            message: error.message
+            message: error.message,
+            timestamp: new Date().toISOString()
         });
     }
 });
 
-// Endpoint de santé
+// ============================================================================
+// ENDPOINT: Santé du serveur
+// ============================================================================
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'online',
         timestamp: new Date().toISOString(),
-        cache: cryptoListCache ? `${cryptoListCache.total} cryptos en cache` : 'Aucun cache',
-        version: '2.0 - Linear Regression Model'
+        cache: cryptoListCache ? `${cryptoListCache.total} cryptos` : 'empty',
+        version: '2.1 - Linear Regression'
     });
 });
 
-// Démarrage du serveur
+// ============================================================================
+// ENDPOINT: Page d'accueil
+// ============================================================================
+app.get('/', (req, res) => {
+    res.json({
+        name: '🤖 API Prédiction Crypto IA',
+        version: '2.1',
+        endpoints: {
+            '/api/health': 'GET - État du serveur',
+            '/api/crypto-list': 'GET - TOP 250 cryptos',
+            '/api/predict/:coinId': 'GET - Prédiction pour une crypto'
+        },
+        examples: {
+            health: 'http://localhost:3000/api/health',
+            list: 'http://localhost:3000/api/crypto-list',
+            predict: 'http://localhost:3000/api/predict/bitcoin'
+        }
+    });
+});
+
+// ============================================================================
+// DÉMARRAGE
+// ============================================================================
 app.listen(PORT, () => {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`🚀 Serveur de prédiction crypto IA V2 démarré!`);
-    console.log(`📡 Port: ${PORT}`);
-    console.log(`🌐 http://localhost:${PORT}`);
-    console.log(`💹 Support: TOP 250 cryptomonnaies`);
-    console.log(`🤖 Modèle: Linear Regression (CoinGecko Style)`);
-    console.log(`${'='.repeat(60)}\n`);
+    console.log(`🌐 Serveur écoute sur: http://localhost:${PORT}`);
+    console.log(`📊 Liste cryptos: http://localhost:${PORT}/api/crypto-list`);
+    console.log(`🔮 Prédiction: http://localhost:${PORT}/api/predict/bitcoin`);
+    console.log(`❤️  Santé: http://localhost:${PORT}/api/health`);
+    console.log();
 });
