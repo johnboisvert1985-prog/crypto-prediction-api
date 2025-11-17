@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Collecte de données crypto avec feature engineering
-Basé sur la méthode CoinGecko
+Collecte de donnees crypto avec feature engineering - V2.1 CORRIGÉ
+- Résout l'erreur "method='bfill'" deprecated
+- Gestion du rate limit CoinGecko
+- Retry automatique robuste
 """
 
 import requests
@@ -10,195 +12,235 @@ import pandas as pd
 import numpy as np
 import sys
 import json
+import time
 from datetime import datetime
 
-def fetch_ohlc_data(coin_id, days=30):
-    """
-    Récupère les données OHLC (Open, High, Low, Close) de CoinGecko
-    """
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
-    params = {
-        "vs_currency": "usd",
-        "days": days
-    }
+class DataCollector:
+    """Collecte les données de CoinGecko avec gestion robuste du rate limit"""
     
-    try:
-        print(f"📊 Récupération données OHLC pour {coin_id.upper()}...")
-        response = requests.get(url, params=params, timeout=10)
-        
-        if response.status_code == 429:
-            print("⚠️ Rate limit CoinGecko. Tentative avec données simplifiées...")
-            return fetch_simple_data(coin_id, days)
-        
-        if response.status_code != 200:
-            raise Exception(f"Erreur API: {response.status_code}")
-        
-        data = response.json()
-        
-        if not data or len(data) < 7:
-            raise Exception("Pas assez de données historiques")
-        
-        # Créer DataFrame
-        df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df = df.sort_values('timestamp').reset_index(drop=True)
-        
-        print(f"✅ {len(df)} jours de données récupérées")
-        return df
-        
-    except Exception as e:
-        print(f"❌ Erreur OHLC: {str(e)}")
-        return fetch_simple_data(coin_id, days)
-
-def fetch_simple_data(coin_id, days=30):
-    """
-    Fallback: utilise market_chart pour obtenir seulement les prix
-    """
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-    params = {
-        "vs_currency": "usd",
-        "days": days,
-        "interval": "daily"
-    }
+    def __init__(self, coin_id, days=30):
+        self.coin_id = coin_id.lower()
+        self.days = days
+        self.base_url = "https://api.coingecko.com/api/v3"
+        self.min_delay = 1.5  # Délai minimum entre requêtes (CoinGecko: 10-50 req/min)
+        self.last_request_time = 0
     
-    try:
-        print(f"📈 Fallback: récupération prix simples...")
-        response = requests.get(url, params=params, timeout=10)
+    def _respecter_rate_limit(self):
+        """Respecte le rate limit de CoinGecko"""
+        elapsed = time.time() - self.last_request_time
+        if elapsed < self.min_delay:
+            wait_time = self.min_delay - elapsed
+            print(f"⏳ Attente {wait_time:.2f}s (respect du rate limit CoinGecko)...")
+            time.sleep(wait_time)
+        self.last_request_time = time.time()
+    
+    def _faire_requete(self, url, params, max_tentatives=4):
+        """Fait une requête avec retry automatique"""
+        for tentative in range(max_tentatives):
+            try:
+                self._respecter_rate_limit()
+                
+                print(f"🔄 Tentative {tentative + 1}/{max_tentatives}: {url}")
+                response = requests.get(
+                    url,
+                    params=params,
+                    timeout=15,
+                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                )
+                
+                # Vérifier le statut
+                if response.status_code == 429:
+                    raise Exception("Rate limit atteint (429)")
+                
+                if response.status_code != 200:
+                    raise Exception(f"Erreur {response.status_code}")
+                
+                data = response.json()
+                print(f"✅ Succès!")
+                return data
+                
+            except requests.exceptions.Timeout:
+                print(f"⚠️  Timeout - Tentative {tentative + 1}/{max_tentatives}")
+            except requests.exceptions.ConnectionError as e:
+                print(f"⚠️  Erreur connexion - Tentative {tentative + 1}/{max_tentatives}")
+            except Exception as e:
+                print(f"⚠️  {str(e)} - Tentative {tentative + 1}/{max_tentatives}")
+            
+            # Backoff exponentiel
+            if tentative < max_tentatives - 1:
+                wait_time = (2 ** tentative) + (tentative * 3)
+                print(f"⏳ Nouvelle tentative dans {wait_time}s...")
+                time.sleep(wait_time)
         
-        if response.status_code != 200:
-            raise Exception(f"Erreur API: {response.status_code}")
+        raise Exception(f"Impossible de récupérer les données après {max_tentatives} tentatives")
+    
+    def telecharger_ohlc(self):
+        """Télécharge les données OHLC"""
+        print(f"📥 Téléchargement OHLC pour {self.coin_id.upper()}...")
         
-        data = response.json()
+        url = f"{self.base_url}/coins/{self.coin_id}/ohlc"
+        params = {
+            "vs_currency": "usd",
+            "days": self.days
+        }
+        
+        try:
+            data = self._faire_requete(url, params)
+            
+            if not data or len(data) < 7:
+                raise Exception("Pas assez de données OHLC")
+            
+            # Créer DataFrame
+            df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df = df.sort_values('timestamp').reset_index(drop=True)
+            
+            print(f"✅ {len(df)} jours OHLC récupérés")
+            return df
+            
+        except Exception as e:
+            print(f"⚠️  OHLC échoué: {str(e)}")
+            print(f"📥 Fallback: utilisation market_chart...")
+            return self.telecharger_market_chart()
+    
+    def telecharger_market_chart(self):
+        """Fallback: utilise market_chart pour prix + volumes"""
+        print(f"📊 Récupération market_chart...")
+        
+        url = f"{self.base_url}/coins/{self.coin_id}/market_chart"
+        params = {
+            "vs_currency": "usd",
+            "days": self.days,
+            "interval": "daily"
+        }
+        
+        data = self._faire_requete(url, params)
+        
         prices = data.get('prices', [])
         volumes = data.get('total_volumes', [])
         
         if len(prices) < 7:
-            raise Exception("Pas assez de données")
+            raise Exception("Pas assez de données market_chart")
         
-        # Créer DataFrame avec prix seulement
+        # Créer DataFrame
         df = pd.DataFrame(prices, columns=['timestamp', 'close'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         
-        # Simuler OHLC à partir du prix
-        df['open'] = df['close']
-        df['high'] = df['close'] * 1.02  # +2%
-        df['low'] = df['close'] * 0.98   # -2%
+        # Simuler OHLC avec des variations réalistes
+        np.random.seed(42)
+        variations = np.random.uniform(0.98, 1.02, len(df))
+        df['open'] = df['close'] * np.random.uniform(0.98, 1.02, len(df))
+        df['high'] = df['close'] * np.random.uniform(1.00, 1.03, len(df))
+        df['low'] = df['close'] * np.random.uniform(0.97, 1.00, len(df))
         
-        # Ajouter volumes si disponibles
+        # Ajouter volumes
         if volumes:
             vol_df = pd.DataFrame(volumes, columns=['timestamp', 'volume'])
             df = df.merge(vol_df, on='timestamp', how='left')
+            df['volume'] = df['volume'].fillna(0)
         
-        print(f"✅ {len(df)} jours de données (mode simplifié)")
+        print(f"✅ {len(df)} jours market_chart (mode simulé)")
         return df
+    
+    def creer_features(self, df):
+        """Crée les features pour le modèle"""
+        print("🔧 Création des features...")
         
-    except Exception as e:
-        print(f"❌ Erreur complète: {str(e)}")
-        return None
-
-def create_features(df):
-    """
-    Feature engineering - Méthode CoinGecko
-    """
-    print("🔧 Création des features...")
+        # 1. Différences de prix
+        df['open_close'] = df['open'] - df['close']
+        df['high_low'] = df['high'] - df['low']
+        
+        # 2. Moyennes mobiles
+        df['ma_7'] = df['close'].rolling(window=7, min_periods=1).mean()
+        df['ma_14'] = df['close'].rolling(window=14, min_periods=7).mean()
+        
+        # 3. Volatilité
+        df['volatility'] = df['close'].rolling(window=7, min_periods=1).std()
+        
+        # 4. Prix relatif
+        rolling_max = df['close'].rolling(window=14, min_periods=7).max()
+        df['price_ratio'] = df['close'] / (rolling_max + 1e-10)
+        
+        # 5. Momentum
+        df['momentum'] = df['close'].pct_change(periods=7)
+        
+        # 6. Range ratio
+        df['range_ratio'] = (df['high'] - df['low']) / (df['close'] + 1e-10)
+        
+        # ✅ CORRIGÉ: Utiliser bfill() et ffill() au lieu de method=
+        df = df.bfill()
+        df = df.ffill()
+        
+        # Vérifier qu'on a assez de données
+        if len(df) < 7:
+            raise Exception("Pas assez de données après feature engineering")
+        
+        print(f"✅ Features créées: {len(df)} lignes valides")
+        return df
     
-    # 1. Différences de prix
-    df['open_close'] = df['open'] - df['close']
-    df['high_low'] = df['high'] - df['low']
-    
-    # 2. Moyennes mobiles
-    df['ma_7'] = df['close'].rolling(window=7, min_periods=1).mean()
-    df['ma_14'] = df['close'].rolling(window=14, min_periods=7).mean()
-    
-    # 3. Volatilité (écart-type sur 7 jours)
-    df['volatility'] = df['close'].rolling(window=7, min_periods=1).std()
-    
-    # 4. Prix relatif (ratio avec max sur 14 jours)
-    rolling_max = df['close'].rolling(window=14, min_periods=7).max()
-    df['price_ratio'] = df['close'] / rolling_max
-    
-    # 5. Momentum (changement de prix sur 7 jours)
-    df['momentum'] = df['close'].pct_change(periods=7)
-    
-    # 6. Range ratio (high-low / close)
-    df['range_ratio'] = (df['high'] - df['low']) / df['close']
-    
-    # Remplir les NaN avec des valeurs raisonnables
-    df = df.fillna(method='bfill').fillna(method='ffill')
-    
-    # Vérifier qu'on a assez de données valides
-    if len(df) < 7:
-        raise Exception("Pas assez de données après feature engineering")
-    
-    print(f"✅ Features créées: {len(df)} lignes valides")
-    
-    return df
-
-def save_data(df, coin_id):
-    """
-    Sauvegarde les données pour le modèle
-    """
-    filename = f"data_{coin_id}.csv"
-    df.to_csv(filename, index=False)
-    print(f"💾 Données sauvegardées: {filename}")
-    
-    # Sauvegarder aussi le dernier prix pour référence
-    latest_data = {
-        'coin_id': coin_id,
-        'latest_close': float(df['close'].iloc[-1]),
-        'latest_open': float(df['open'].iloc[-1]),
-        'latest_high': float(df['high'].iloc[-1]),
-        'latest_low': float(df['low'].iloc[-1]),
-        'timestamp': df['timestamp'].iloc[-1].isoformat(),
-        'rows': len(df)
-    }
-    
-    with open(f"latest_{coin_id}.json", 'w') as f:
-        json.dump(latest_data, f)
-    
-    return filename
+    def sauvegarder(self, df):
+        """Sauvegarde les données"""
+        filename = f"data_{self.coin_id}.csv"
+        df.to_csv(filename, index=False)
+        print(f"💾 Données sauvegardées: {filename}")
+        
+        # Sauvegarder métadonnées
+        latest_data = {
+            'coin_id': self.coin_id,
+            'latest_close': float(df['close'].iloc[-1]),
+            'latest_open': float(df['open'].iloc[-1]),
+            'latest_high': float(df['high'].iloc[-1]),
+            'latest_low': float(df['low'].iloc[-1]),
+            'timestamp': df['timestamp'].iloc[-1].isoformat(),
+            'rows': len(df)
+        }
+        
+        with open(f"latest_{self.coin_id}.json", 'w') as f:
+            json.dump(latest_data, f)
+        
+        return filename
 
 def main():
     if len(sys.argv) < 2:
         print("❌ Usage: python collect_data_v2.py <coin_id>")
         sys.exit(1)
     
-    coin_id = sys.argv[1].lower()
+    coin_id = sys.argv[1]
     
     print("=" * 60)
-    print(f"🚀 COLLECTE DE DONNÉES V2: {coin_id.upper()}")
+    print(f"🚀 COLLECTE V2.1 - {coin_id.upper()}")
     print("=" * 60)
     print()
     
     try:
-        # 1. Récupérer données OHLC
-        df = fetch_ohlc_data(coin_id, days=30)
-        
-        if df is None or len(df) < 7:
-            raise Exception("Impossible de récupérer assez de données")
+        # 1. Télécharger
+        collector = DataCollector(coin_id, days=30)
+        df = collector.telecharger_ohlc()
         
         # 2. Créer features
-        df = create_features(df)
+        df = collector.creer_features(df)
         
         # 3. Sauvegarder
-        filename = save_data(df, coin_id)
+        filename = collector.sauvegarder(df)
         
         print()
         print("=" * 60)
-        print("✅ COLLECTE TERMINÉE AVEC SUCCÈS")
+        print("✅ COLLECTE RÉUSSIE")
         print("=" * 60)
         print(f"Fichier: {filename}")
         print(f"Lignes: {len(df)}")
-        print(f"Features: {len(df.columns)}")
+        print(f"Colonnes: {len(df.columns)}")
+        print()
         
         sys.exit(0)
         
     except Exception as e:
         print()
         print("=" * 60)
-        print("❌ ÉCHEC DE LA COLLECTE")
+        print("❌ ERREUR COLLECTE")
         print("=" * 60)
         print(f"Erreur: {str(e)}")
+        print()
         sys.exit(1)
 
 if __name__ == "__main__":
