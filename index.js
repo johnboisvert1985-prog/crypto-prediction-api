@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { spawn } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,79 +13,45 @@ app.use(express.static('public'));
 
 // Cache pour la liste des cryptos
 let cryptoListCache = null;
-let cacheTimestamp = null;
-const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 heures
 
 console.log(`\n${'='.repeat(60)}`);
 console.log(`🚀 SERVEUR DE PRÉDICTION CRYPTO V2.1`);
 console.log(`${'='.repeat(60)}\n`);
+
+// Charger le cache statique au démarrage
+function loadStaticCache() {
+    try {
+        const cacheFile = path.join(__dirname, 'cryptos.json');
+        if (fs.existsSync(cacheFile)) {
+            const data = fs.readFileSync(cacheFile, 'utf8');
+            cryptoListCache = JSON.parse(data);
+            console.log(`✅ Cache statique chargé: ${cryptoListCache.cryptos.length} cryptos`);
+            return true;
+        }
+    } catch (error) {
+        console.error('⚠️  Erreur chargement cache:', error.message);
+    }
+    return false;
+}
+
+// Charger le cache au démarrage
+loadStaticCache();
 
 // ============================================================================
 // ENDPOINT: Liste des TOP 250 cryptos
 // ============================================================================
 app.get('/api/crypto-list', async (req, res) => {
     try {
-        // Vérifier le cache AVANT toute chose
-        if (cryptoListCache && cacheTimestamp && (Date.now() - cacheTimestamp < CACHE_DURATION)) {
-            console.log('📦 Retour de la liste depuis le cache');
+        // Retourner le cache statique (toujours disponible)
+        if (cryptoListCache) {
+            console.log('📦 Retour de la liste depuis le cache statique');
             return res.json(cryptoListCache);
         }
-
-        console.log('📥 Récupération TOP 250 cryptos de CoinGecko...');
         
-        const fetch = (await import('node-fetch')).default;
-        
-        const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false`;
-        
-        console.log('🔄 Requête vers CoinGecko (peut prendre 5-10s)...');
-        const response = await fetch(url, { timeout: 20000 });
-        
-        if (!response.ok) {
-            if (response.status === 429) {
-                // Rate limit - retourner le cache ancien s'il existe
-                if (cryptoListCache) {
-                    console.log('⚠️  Rate limit atteint - Retour du cache ancien');
-                    return res.json(cryptoListCache);
-                }
-                throw new Error(`Rate limit CoinGecko. Réessayez dans 1 minute.`);
-            }
-            throw new Error(`Erreur API CoinGecko: ${response.status}`);
-        }
-        
-        const data = await response.json();
-
-        // Formater la liste
-        const cryptoList = data.map((crypto, index) => ({
-            id: crypto.id,
-            symbol: crypto.symbol.toUpperCase(),
-            name: crypto.name,
-            rank: index + 1,
-            price: crypto.current_price,
-            market_cap: crypto.market_cap,
-            price_change_24h: crypto.price_change_percentage_24h,
-            image: crypto.image
-        }));
-
-        // Mettre en cache
-        cryptoListCache = {
-            cryptos: cryptoList,
-            total: cryptoList.length,
-            timestamp: new Date().toISOString()
-        };
-        cacheTimestamp = Date.now();
-
-        console.log(`✅ ${cryptoList.length} cryptos en cache`);
-        res.json(cryptoListCache);
+        throw new Error('Cache non disponible');
 
     } catch (error) {
         console.error('❌ Erreur:', error.message);
-        
-        // Fallback: retourner le cache ancien même s'il est expiré
-        if (cryptoListCache) {
-            console.log('📦 Utilisation du cache (même expiré)');
-            return res.json(cryptoListCache);
-        }
-        
         res.status(500).json({
             error: 'Erreur lors de la récupération de la liste',
             message: error.message
@@ -113,7 +80,7 @@ app.get('/api/predict/:coinId', async (req, res) => {
 
         const collectOutput = await new Promise((resolve, reject) => {
             collectProcess = spawn('python3', ['collect_data_v2.py', coinId], {
-                timeout: 120000  // 120 secondes
+                timeout: 120000
             });
             
             let output = '';
@@ -160,7 +127,7 @@ app.get('/api/predict/:coinId', async (req, res) => {
 
         const prediction = await new Promise((resolve, reject) => {
             modelProcess = spawn('python3', ['ai_model_v2.py'], {
-                timeout: 60000  // 60 secondes
+                timeout: 60000
             });
             
             let output = '';
@@ -190,7 +157,6 @@ app.get('/api/predict/:coinId', async (req, res) => {
                     reject(new Error(`Modèle échoué (code ${code}): ${error}`));
                 } else {
                     try {
-                        // Extraire le JSON
                         const jsonMatch = output.match(/\{[\s\S]*\}/);
                         if (!jsonMatch) {
                             throw new Error('Aucun JSON trouvé en sortie');
@@ -221,7 +187,6 @@ app.get('/api/predict/:coinId', async (req, res) => {
         console.error(`Temps écoulé: ${totalTime}ms`);
         console.log(`${'='.repeat(60)}\n`);
 
-        // Tuer les process si encore actifs
         if (collectProcess) collectProcess.kill();
         if (modelProcess) modelProcess.kill();
 
@@ -240,8 +205,8 @@ app.get('/api/health', (req, res) => {
     res.json({
         status: 'online',
         timestamp: new Date().toISOString(),
-        cache: cryptoListCache ? `${cryptoListCache.total} cryptos` : 'empty',
-        version: '2.1 - Linear Regression'
+        cache: cryptoListCache ? `${cryptoListCache.cryptos.length} cryptos` : 'empty',
+        version: '2.1 - Gradient Boosting'
     });
 });
 
