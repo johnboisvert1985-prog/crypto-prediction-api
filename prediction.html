@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🤖 Prédiction Crypto IA Pro</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+
     <style>
         * {
             margin: 0;
@@ -496,8 +496,12 @@
                             <div class="signal-value">${signal}</div>
                         </div>
 
-                        <div class="chart-container">
-                            <canvas id="predictionChart"></canvas>
+                        <div class="chart-container" style="display: flex; align-items: center; justify-content: center;">
+                            <div style="text-align: center; color: #cbd5e1;">
+                                <p style="margin-bottom: 10px;">📈 Graphique</p>
+                                <p style="font-size: 0.9em;">Prix actuel: $<span id="chartCurrentPrice"></span></p>
+                                <p style="font-size: 0.9em; color: #10b981;">Prix prédit: $<span id="chartPredictedPrice"></span></p>
+                            </div>
                         </div>
 
                         <div class="stats-grid">
@@ -535,74 +539,12 @@
         }
 
         function createChart(data) {
-            setTimeout(() => {
-                // Vérifier que Chart.js est chargé
-                if (typeof Chart === 'undefined') {
-                    console.warn('⚠️ Chart.js non chargé');
-                    return;
-                }
-
-                const ctx = document.getElementById('predictionChart');
-                if (!ctx) return;
-
-                const historicalData = data.historical_data || [];
-                const labels = historicalData.map(d => d.day || 'Jour');
-                const prices = historicalData.map(d => d.price);
-                
-                if (predictionChart) predictionChart.destroy();
-
-                predictionChart = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels,
-                        datasets: [
-                            {
-                                label: 'Prix Historique',
-                                data: prices,
-                                borderColor: '#3b82f6',
-                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                tension: 0.4,
-                                fill: true,
-                                pointBackgroundColor: '#3b82f6',
-                                pointBorderColor: '#fff',
-                                pointBorderWidth: 2,
-                                pointRadius: 5
-                            },
-                            {
-                                label: 'Prix Prédit',
-                                data: [...new Array(prices.length - 1), null, data.predicted_price],
-                                borderColor: '#10b981',
-                                borderDash: [5, 5],
-                                borderWidth: 2,
-                                tension: 0.4,
-                                pointBackgroundColor: '#10b981',
-                                pointBorderColor: '#fff',
-                                pointBorderWidth: 2,
-                                pointRadius: 6
-                            }
-                        ]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                labels: { color: '#e2e8f0', font: { size: 12 }, padding: 15 }
-                            }
-                        },
-                        scales: {
-                            y: {
-                                ticks: { color: '#94a3b8' },
-                                grid: { color: 'rgba(148, 163, 184, 0.1)' }
-                            },
-                            x: {
-                                ticks: { color: '#94a3b8' },
-                                grid: { color: 'rgba(148, 163, 184, 0.1)' }
-                            }
-                        }
-                    }
-                });
-            }, 100);
+            // Afficher les prix dans le graphique
+            const currentPriceEl = document.getElementById('chartCurrentPrice');
+            const predictedPriceEl = document.getElementById('chartPredictedPrice');
+            
+            if (currentPriceEl) currentPriceEl.textContent = formatPrice(data.current_price);
+            if (predictedPriceEl) predictedPriceEl.textContent = formatPrice(data.predicted_price);
         }
 
         window.addEventListener('load', loadCryptoList);
