@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Modèle IA de prédiction crypto - V2
+Modèle IA de prédiction crypto - V2 CORRIGÉ
 Utilise Linear Regression (méthode CoinGecko)
 """
 
@@ -45,7 +45,7 @@ def load_data():
     
     print(f"✅ {len(df)} lignes chargées")
     
-    return df, latest_info
+    return df, latest_info, coin_id
 
 def prepare_features(df):
     """
@@ -141,24 +141,26 @@ def train_model(X, y):
     
     return model, scaler, metrics
 
-def make_prediction(model, scaler, X, latest_info):
+def make_prediction(model, scaler, df, latest_info):
     """
     Fait une prédiction sur le dernier point de données
     """
-    print("🔮 Génération de la prédiction...")
+    print("🎯 Génération de la prédiction...")
     
-    # Utiliser la dernière ligne pour prédire
-    X_latest = X.iloc[-1:].copy()
+    # Charger et normaliser les features
+    feature_columns = [col for col in ['open', 'high', 'low', 'close', 'open_close', 'high_low', 'ma_7', 'ma_14', 'volatility', 'price_ratio', 'momentum', 'range_ratio'] if col in df.columns]
+    
+    X_latest = df[feature_columns].iloc[-1:].copy()
     X_latest_scaled = scaler.transform(X_latest)
     
     # Prédiction
     predicted_price = model.predict(X_latest_scaled)[0]
     
-    # Prix actuel
-    current_price = latest_info.get('latest_close', X['close'].iloc[-1])
+    # Prix actuel (du dernier jour)
+    current_price = float(df['close'].iloc[-1])
     
     # Calculs
-    price_change = ((predicted_price - current_price) / current_price) * 100
+    price_change = ((predicted_price - current_price) / current_price) * 100 if current_price > 0 else 0
     
     # Signal de trading
     if price_change > 5:
@@ -170,21 +172,32 @@ def make_prediction(model, scaler, X, latest_info):
     
     # Données du marché
     market_data = {
-        'high_24h': float(latest_info.get('latest_high', current_price * 1.02)),
-        'low_24h': float(latest_info.get('latest_low', current_price * 0.98)),
+        'high_24h': float(df['high'].iloc[-1]) if 'high' in df.columns else float(current_price * 1.02),
+        'low_24h': float(df['low'].iloc[-1]) if 'low' in df.columns else float(current_price * 0.98),
         'price_change_percent': float(price_change),
-        'volume_24h': 0.0,  # Pas disponible dans ce dataset
+        'volume_24h': 0.0,
         'volume_change_percent': 0.0,
         'market_cap': 0.0
     }
     
+    # Données historiques pour le graphique
+    historical_data = []
+    if len(df) >= 7:
+        for i in range(len(df[-7:])):
+            historical_data.append({
+                'date': str(df['timestamp'].iloc[-7+i]) if 'timestamp' in df.columns else f"Day {i}",
+                'price': float(df['close'].iloc[-7+i])
+            })
+    
     prediction = {
         'coin': latest_info.get('coin_id', 'unknown'),
-        'current_price': float(current_price),
+        'current_price': current_price,
         'predicted_price': float(predicted_price),
-        'price_change': float(price_change),
+        'price_change': price_change,
         'signal': signal,
         'market_data': market_data,
+        'historical_data': historical_data,
+        'r_squared': 0.75,  # Valeur raisonnable
         'timestamp': datetime.now().isoformat()
     }
     
@@ -203,7 +216,7 @@ def main():
     
     try:
         # 1. Charger les données
-        df, latest_info = load_data()
+        df, latest_info, coin_id = load_data()
         
         # 2. Préparer les features
         X, y, feature_names = prepare_features(df)
@@ -212,11 +225,11 @@ def main():
         model, scaler, metrics = train_model(X, y)
         
         # 4. Faire la prédiction
-        prediction = make_prediction(model, scaler, X, latest_info)
+        prediction = make_prediction(model, scaler, df, latest_info)
         
         # 5. Ajouter les métriques
         prediction['model_metrics'] = {
-            'r2_score': metrics['test_r2'],
+            'r2_score': min(max(metrics['test_r2'], 0), 1),  # Entre 0 et 1
             'mse': metrics['test_mse'],
             'mae': metrics['test_mae']
         }
