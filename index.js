@@ -24,7 +24,7 @@ console.log(`${'='.repeat(60)}\n`);
 // ============================================================================
 app.get('/api/crypto-list', async (req, res) => {
     try {
-        // Vérifier le cache
+        // Vérifier le cache AVANT toute chose
         if (cryptoListCache && cacheTimestamp && (Date.now() - cacheTimestamp < CACHE_DURATION)) {
             console.log('📦 Retour de la liste depuis le cache');
             return res.json(cryptoListCache);
@@ -41,6 +41,11 @@ app.get('/api/crypto-list', async (req, res) => {
         
         if (!response.ok) {
             if (response.status === 429) {
+                // Rate limit - retourner le cache ancien s'il existe
+                if (cryptoListCache) {
+                    console.log('⚠️  Rate limit atteint - Retour du cache ancien');
+                    return res.json(cryptoListCache);
+                }
                 throw new Error(`Rate limit CoinGecko. Réessayez dans 1 minute.`);
             }
             throw new Error(`Erreur API CoinGecko: ${response.status}`);
@@ -73,6 +78,13 @@ app.get('/api/crypto-list', async (req, res) => {
 
     } catch (error) {
         console.error('❌ Erreur:', error.message);
+        
+        // Fallback: retourner le cache ancien même s'il est expiré
+        if (cryptoListCache) {
+            console.log('📦 Utilisation du cache (même expiré)');
+            return res.json(cryptoListCache);
+        }
+        
         res.status(500).json({
             error: 'Erreur lors de la récupération de la liste',
             message: error.message
@@ -234,32 +246,13 @@ app.get('/api/health', (req, res) => {
 });
 
 // ============================================================================
-// ENDPOINT: Page d'accueil
-// ============================================================================
-app.get('/', (req, res) => {
-    res.json({
-        name: '🤖 API Prédiction Crypto IA',
-        version: '2.1',
-        endpoints: {
-            '/api/health': 'GET - État du serveur',
-            '/api/crypto-list': 'GET - TOP 250 cryptos',
-            '/api/predict/:coinId': 'GET - Prédiction pour une crypto'
-        },
-        examples: {
-            health: 'http://localhost:3000/api/health',
-            list: 'http://localhost:3000/api/crypto-list',
-            predict: 'http://localhost:3000/api/predict/bitcoin'
-        }
-    });
-});
-
-// ============================================================================
-// DÉMARRAGE
+// Démarrage du serveur
 // ============================================================================
 app.listen(PORT, () => {
+    console.log(`\n${'='.repeat(60)}`);
     console.log(`🌐 Serveur écoute sur: http://localhost:${PORT}`);
     console.log(`📊 Liste cryptos: http://localhost:${PORT}/api/crypto-list`);
     console.log(`🔮 Prédiction: http://localhost:${PORT}/api/predict/bitcoin`);
     console.log(`❤️  Santé: http://localhost:${PORT}/api/health`);
-    console.log();
+    console.log(`${'='.repeat(60)}\n`);
 });
