@@ -22,22 +22,23 @@ console.log(`${'='.repeat(60)}\n`);
 function loadStaticCache() {
     try {
         const cacheFile = path.join(__dirname, 'cryptos.json');
-        console.log(`📂 Tentative de chargement: ${cacheFile}`);
+        console.log(`📂 Chemin: ${cacheFile}`);
+        console.log(`📂 Exists: ${fs.existsSync(cacheFile)}`);
         
         if (fs.existsSync(cacheFile)) {
             const data = fs.readFileSync(cacheFile, 'utf8');
             cryptoListCache = JSON.parse(data);
-            console.log(`✅ Cache statique chargé: ${cryptoListCache.cryptos.length} cryptos`);
+            console.log(`✅ Cache chargé: ${cryptoListCache.total} cryptos`);
+            console.log(`   Premiers: ${cryptoListCache.cryptos.slice(0, 3).map(c => c.name).join(', ')}`);
             return true;
         } else {
-            console.warn('⚠️  Fichier cryptos.json non trouvé');
+            console.warn('⚠️  cryptos.json introuvable - fallback minimal');
         }
     } catch (error) {
-        console.error('⚠️  Erreur chargement cache:', error.message);
+        console.error('❌ Erreur:', error.message);
     }
     
-    // Fallback: créer un cache minimal
-    console.log('📦 Utilisation cache minimal (top 20 cryptos)');
+    // Fallback minimal
     cryptoListCache = {
         cryptos: [
             {"id": "bitcoin", "symbol": "BTC", "name": "Bitcoin", "rank": 1, "price": 91471.52, "market_cap": 1824134320935, "price_change_24h": -3.42, "image": "https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png?1696501400"},
@@ -48,6 +49,7 @@ function loadStaticCache() {
         ],
         total: 5
     };
+    console.log('📦 Mode fallback: 5 cryptos');
     return true;
 }
 
