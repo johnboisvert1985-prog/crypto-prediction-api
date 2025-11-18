@@ -391,22 +391,35 @@
 
         async function loadCryptoList() {
             try {
+                console.log(`🔄 Chargement cryptos depuis: ${API_URL}/api/crypto-list`);
+                
                 const response = await fetch(`${API_URL}/api/crypto-list`);
                 const data = await response.json();
                 
+                console.log('📦 Données reçues:', data);
+                
                 allCryptos = data.cryptos || [];
+                
+                if (!allCryptos || allCryptos.length === 0) {
+                    throw new Error('Aucune crypto reçue');
+                }
+                
+                console.log(`✅ ${allCryptos.length} cryptos chargées`);
+                
                 const select = document.getElementById('cryptoSelect');
                 select.innerHTML = '<option value="">📊 Sélectionner une crypto...</option>';
                 
                 allCryptos.forEach(crypto => {
                     const option = document.createElement('option');
                     option.value = crypto.id;
-                    option.textContent = `#${crypto.rank} ${crypto.name} (${crypto.symbol}) - $${formatPrice(crypto.price)}`;
+                    option.textContent = `#${crypto.rank} ${crypto.name} (${crypto.symbol}) - ${formatPrice(crypto.price)}`;
                     select.appendChild(option);
                 });
 
+                console.log('✅ Dropdown rempli');
                 checkApiStatus();
             } catch (error) {
+                console.error('❌ Erreur:', error);
                 document.getElementById('cryptoSelect').innerHTML = '<option value="">❌ Erreur de chargement</option>';
             }
         }
