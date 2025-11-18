@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const { spawn } = require('child_process');
 const path = require('path');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -14,7 +13,7 @@ app.use(express.static('public'));
 // Cache pour la liste des cryptos
 let cryptoListCache = null;
 let cacheTimestamp = null;
-const CACHE_DURATION = 60 * 60 * 1000; // 1 heure
+const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 heures
 
 console.log(`\n${'='.repeat(60)}`);
 console.log(`🚀 SERVEUR DE PRÉDICTION CRYPTO V2.1`);
