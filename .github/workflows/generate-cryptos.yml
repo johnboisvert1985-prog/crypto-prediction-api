@@ -1,0 +1,32 @@
+name: Generate Cryptos
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * *'  # Chaque jour à minuit
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Use Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '16'
+      
+      - name: Install dependencies
+        run: npm install node-fetch
+      
+      - name: Generate cryptos.json
+        run: node -e "const fetch = require('node-fetch'); fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1').then(r => r.json()).then(data => { const cryptos = data.map((c,i) => ({id: c.id, symbol: c.symbol.toUpperCase(), name: c.name, rank: i+1, price: c.current_price, market_cap: c.market_cap, price_change_24h: c.price_change_percentage_24h, image: c.image})); const fs = require('fs'); fs.writeFileSync('cryptos.json', JSON.stringify({cryptos, total: cryptos.length}, null, 2)); console.log('✅ '+cryptos.length+' cryptos!'); });"
+      
+      - name: Commit and push
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add cryptos.json
+          git commit -m "🤖 Auto-generate 250 cryptos" || true
+          git push
