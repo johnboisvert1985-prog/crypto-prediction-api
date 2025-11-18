@@ -536,6 +536,12 @@
 
         function createChart(data) {
             setTimeout(() => {
+                // Vérifier que Chart.js est chargé
+                if (typeof Chart === 'undefined') {
+                    console.warn('⚠️ Chart.js non chargé');
+                    return;
+                }
+
                 const ctx = document.getElementById('predictionChart');
                 if (!ctx) return;
 
