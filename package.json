@@ -1,10 +1,10 @@
 {
   "name": "crypto-prediction-ai",
   "version": "2.0.0",
-  "description": "Système de prédiction de prix crypto avec IA - TOP 1000 cryptomonnaies",
+  "description": "Système de prédiction de prix crypto avec IA - TOP 250 cryptomonnaies",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node generate_cryptos.js && node index.js",
     "dev": "nodemon index.js"
   },
   "keywords": [
