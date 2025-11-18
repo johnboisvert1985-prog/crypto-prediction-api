@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Modèle IA - EXACTEMENT comme CoinGecko
-Prédiction du PROCHAIN jour, pas du jour actuel
+Modèle IA PRO - Gradient Boosting
+Prédiction 7 jours avec features avancées
 """
 
 import json
 import sys
 import glob
 import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
-from datetime import datetime
+import pandas as pd
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+from datetime import datetime, timedelta
+import warnings
+warnings.filterwarnings('ignore')
 
 def load_data():
     """Charge les données collectées"""
@@ -22,7 +25,6 @@ def load_data():
         raise Exception("Aucun fichier de données trouvé")
     
     latest_file = max(data_files, key=lambda x: x)
-    
     print(f"📂 Chargement: {latest_file}")
     
     with open(latest_file, 'r') as f:
@@ -32,135 +34,227 @@ def load_data():
     ohlc_data = data.get('ohlc', [])
     market_data = data.get('market_data', {})
     
-    if len(ohlc_data) < 5:
-        raise Exception(f"Pas assez de données ({len(ohlc_data)} jours, minimum 5)")
+    if len(ohlc_data) < 30:
+        raise Exception(f"Pas assez de données ({len(ohlc_data)} jours, minimum 30)")
     
     print(f"✅ {len(ohlc_data)} jours chargés")
-    
     return ohlc_data, market_data, coin_id
 
+def calculate_rsi(prices, period=14):
+    """Calcule le RSI (Relative Strength Index)"""
+    deltas = np.diff(prices)
+    seed = deltas[:period+1]
+    up = seed[seed >= 0].sum() / period
+    down = -seed[seed < 0].sum() / period
+    rs = up / down if down != 0 else 0
+    rsi = np.zeros_like(prices)
+    rsi[:period] = 100. - 100. / (1. + rs)
+    
+    for i in range(period, len(prices)):
+        delta = deltas[i-1]
+        if delta > 0:
+            upval = delta
+            downval = 0.
+        else:
+            upval = 0.
+            downval = -delta
+        
+        up = (up * (period - 1) + upval) / period
+        down = (down * (period - 1) + downval) / period
+        
+        rs = up / down if down != 0 else 0
+        rsi[i] = 100. - 100. / (1. + rs)
+    
+    return rsi
+
+def calculate_macd(prices, fast=12, slow=26, signal=9):
+    """Calcule le MACD"""
+    ema_fast = pd.Series(prices).ewm(span=fast).mean().values
+    ema_slow = pd.Series(prices).ewm(span=slow).mean().values
+    macd = ema_fast - ema_slow
+    macd_signal = pd.Series(macd).ewm(span=signal).mean().values
+    macd_hist = macd - macd_signal
+    return macd, macd_signal, macd_hist
+
 def prepare_data(ohlc_data):
-    """
-    EXACTEMENT comme CoinGecko:
-    - OHLC: [timestamp, open, high, low, close]
-    - X: time + close price
-    - y: prochain jour's close price
-    """
-    print("🔧 Préparation des données...")
+    """Prépare les données avec features avancées"""
+    print("🔧 Préparation des données avec features avancées...")
     
     ohlc = np.array(ohlc_data)
     
-    # Extraire les colonnes: timestamp (0) et close (4)
-    timestamps = ohlc[:, 0]
+    # Extraire OHLCV
+    open_prices = ohlc[:, 1]
+    high_prices = ohlc[:, 2]
+    low_prices = ohlc[:, 3]
     close_prices = ohlc[:, 4]
     
-    # X: Time et Close price (2 features comme CoinGecko)
-    X = np.column_stack([timestamps, close_prices])
+    # Créer DataFrame
+    df = pd.DataFrame({
+        'open': open_prices,
+        'high': high_prices,
+        'low': low_prices,
+        'close': close_prices
+    })
     
-    # y: Le PROCHAIN jour's close price (décalé de 1)
-    y = np.roll(close_prices, -1)  # Décale vers le haut
+    # Features techniques
+    print("   📊 Calcul des features techniques...")
     
-    # On ne peut pas prédire le dernier jour (pas de target)
-    # Donc on enlève la dernière ligne
-    X = X[:-1]
-    y = y[:-1]
+    # 1. Moyennes mobiles
+    df['sma_7'] = df['close'].rolling(window=7).mean()
+    df['sma_14'] = df['close'].rolling(window=14).mean()
+    df['sma_30'] = df['close'].rolling(window=30).mean()
     
-    print(f"   X shape: {X.shape}")
-    print(f"   y shape: {y.shape}")
+    # 2. RSI
+    df['rsi'] = calculate_rsi(close_prices, 14)
     
-    # Normalisation avec MinMaxScaler (COMME CoinGecko)
-    scaler = MinMaxScaler()
-    X_scaled = scaler.fit_transform(X)
+    # 3. MACD
+    macd, macd_signal, macd_hist = calculate_macd(close_prices)
+    df['macd'] = macd
+    df['macd_signal'] = macd_signal
+    df['macd_hist'] = macd_hist
     
-    print(f"✅ Données préparées: {len(X)} samples")
-    print(f"   Premier prix: ${close_prices[0]:,.2f}")
-    print(f"   Dernier prix: ${close_prices[-1]:,.2f}")
+    # 4. Bandes de Bollinger
+    sma_20 = df['close'].rolling(window=20).mean()
+    std_20 = df['close'].rolling(window=20).std()
+    df['bb_upper'] = sma_20 + (std_20 * 2)
+    df['bb_lower'] = sma_20 - (std_20 * 2)
+    df['bb_width'] = df['bb_upper'] - df['bb_lower']
     
-    return X_scaled, y, scaler, close_prices
+    # 5. Volatilité
+    df['volatility'] = df['close'].pct_change().rolling(window=14).std()
+    
+    # 6. Momentum
+    df['momentum'] = df['close'].pct_change(periods=7)
+    
+    # 7. ATR (Average True Range)
+    high_low = df['high'] - df['low']
+    high_close = np.abs(df['high'] - df['close'].shift())
+    low_close = np.abs(df['low'] - df['close'].shift())
+    tr = np.maximum(high_low, np.maximum(high_close, low_close))
+    df['atr'] = pd.Series(tr).rolling(window=14).mean()
+    
+    # 8. Changes
+    df['price_change_1d'] = df['close'].pct_change(1)
+    df['price_change_7d'] = df['close'].pct_change(7)
+    
+    # Remplir les NaN
+    df = df.fillna(method='bfill').fillna(method='ffill')
+    
+    # Préparer X et y pour PRÉDICTION 7 JOURS
+    feature_cols = ['open', 'high', 'low', 'close', 'sma_7', 'sma_14', 'sma_30',
+                   'rsi', 'macd', 'macd_signal', 'macd_hist', 'bb_upper', 'bb_lower',
+                   'bb_width', 'volatility', 'momentum', 'atr', 'price_change_1d', 'price_change_7d']
+    
+    X = df[feature_cols].values
+    
+    # y: Prix 7 jours dans le futur (shift de -7)
+    y = df['close'].shift(-7).values
+    
+    # Enlever les derniers jours (pas de target)
+    X = X[:-7]
+    y = y[:-7]
+    
+    # Enlever les NaN
+    mask = ~np.isnan(y)
+    X = X[mask]
+    y = y[mask]
+    
+    if len(X) < 30:
+        raise Exception(f"Pas assez de samples après préparation ({len(X)}, minimum 30)")
+    
+    print(f"   ✅ {len(X)} samples, {len(feature_cols)} features")
+    print(f"   Prix actuel: ${close_prices[-1]:,.2f}")
+    
+    return X, y, feature_cols, close_prices, df
 
-def train_model(X_scaled, y):
-    """
-    Entraîne Linear Regression COMME CoinGecko
-    """
-    print("🤖 Entraînement du modèle...")
+def train_model(X, y):
+    """Entraîne Gradient Boosting"""
+    print("🤖 Entraînement du modèle Gradient Boosting...")
     
-    # Split 80/20 (SANS shuffle pour time series)
-    split_idx = int(len(X_scaled) * 0.8)
+    # Split 80/20 (time series - pas de shuffle)
+    split_idx = int(len(X) * 0.8)
     
-    X_train = X_scaled[:split_idx]
-    X_test = X_scaled[split_idx:]
+    X_train = X[:split_idx]
+    X_test = X[split_idx:]
     y_train = y[:split_idx]
     y_test = y[split_idx:]
     
     print(f"   Train: {len(X_train)} | Test: {len(X_test)}")
     
-    # Linear Regression (EXACTEMENT comme CoinGecko)
-    model = LinearRegression()
-    model.fit(X_train, y_train)
+    # Normalisation
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # Gradient Boosting (meilleur que Linear Regression!)
+    model = GradientBoostingRegressor(
+        n_estimators=100,
+        learning_rate=0.1,
+        max_depth=5,
+        min_samples_split=5,
+        min_samples_leaf=2,
+        subsample=0.8,
+        random_state=42
+    )
+    
+    model.fit(X_train_scaled, y_train)
     
     # Prédictions
-    y_train_pred = model.predict(X_train)
-    y_test_pred = model.predict(X_test)
+    y_train_pred = model.predict(X_train_scaled)
+    y_test_pred = model.predict(X_test_scaled)
     
     # Métriques
-    try:
-        r2_train = r2_score(y_train, y_train_pred)
-        r2_test = r2_score(y_test, y_test_pred)
-        mse_test = mean_squared_error(y_test, y_test_pred)
-        mae_test = mean_absolute_error(y_test, y_test_pred)
-    except:
-        r2_train = r2_test = 0.75
-        mse_test = mae_test = 0.0
+    r2_train = r2_score(y_train, y_train_pred)
+    r2_test = r2_score(y_test, y_test_pred)
+    mape_test = mean_absolute_percentage_error(y_test, y_test_pred)
+    mae_test = mean_absolute_error(y_test, y_test_pred)
+    rmse_test = np.sqrt(mean_squared_error(y_test, y_test_pred))
     
     print(f"   R² Train: {r2_train:.4f}")
     print(f"   R² Test: {r2_test:.4f}")
-    print(f"   MAE Test: ${mae_test:.2f}")
+    print(f"   MAPE Test: {mape_test:.2f}%")
+    print(f"   MAE: ${mae_test:.2f}")
+    print(f"   RMSE: ${rmse_test:.2f}")
     
-    return model, {
-        'r2_train': max(0, min(r2_train, 1)),
-        'r2_test': max(0, min(r2_test, 1)),
-        'mse': mse_test,
-        'mae': mae_test
+    return model, scaler, {
+        'r2_train': r2_train,
+        'r2_test': r2_test,
+        'mape': mape_test,
+        'mae': mae_test,
+        'rmse': rmse_test
     }
 
-def make_prediction(model, X_scaled, scaler, close_prices, market_data, coin_id):
-    """
-    Prédit le PROCHAIN jour
-    """
-    print("🎯 Génération de la prédiction...")
+def make_prediction(model, scaler, X, close_prices, market_data, coin_id, metrics):
+    """Prédit 7 jours dans le futur"""
+    print("🎯 Génération de la prédiction 7 jours...")
     
-    # Prix actuel (dernier jour connu)
+    # Utiliser les dernières données
+    X_latest = X[-1:, :]
+    X_latest_scaled = scaler.transform(X_latest)
+    
+    predicted_price_7d = float(model.predict(X_latest_scaled)[0])
+    
+    # Prix actuel
     current_price = float(close_prices[-1])
     
-    # Créer les features pour prédiction
-    # On utilise le timestamp du jour suivant et le prix d'aujourd'hui
-    last_timestamp = 1e9  # Approximation
-    X_next = np.array([[last_timestamp, current_price]])
-    
-    # Normaliser
-    X_next_scaled = scaler.transform(X_next)
-    
-    # Prédiction du PROCHAIN jour
-    predicted_price = float(model.predict(X_next_scaled)[0])
-    
     # S'assurer que la prédiction est raisonnable
-    # Entre -20% et +20% du prix actuel
-    min_pred = current_price * 0.8
-    max_pred = current_price * 1.2
-    predicted_price = max(min_pred, min(max_pred, predicted_price))
+    # Limiter à ±15% du prix actuel
+    min_pred = current_price * 0.85
+    max_pred = current_price * 1.15
+    predicted_price_7d = np.clip(predicted_price_7d, min_pred, max_pred)
     
     # Variation
-    price_change = ((predicted_price - current_price) / current_price) * 100
+    price_change_7d = ((predicted_price_7d - current_price) / current_price) * 100
     
     # Signal
-    if price_change > 5:
+    if price_change_7d > 5:
         signal = "ACHETER"
-    elif price_change < -5:
+    elif price_change_7d < -5:
         signal = "VENDRE"
     else:
         signal = "ATTENDRE"
     
-    # Données historiques (derniers 7 jours)
+    # Données historiques
     historical_data = []
     for i, price in enumerate(close_prices[-7:]):
         historical_data.append({
@@ -168,17 +262,21 @@ def make_prediction(model, X_scaled, scaler, close_prices, market_data, coin_id)
             'price': float(price)
         })
     
-    # Ajouter la prédiction
+    # Ajouter la prédiction (jour 7)
     historical_data.append({
-        'day': 1,
-        'price': float(predicted_price)
+        'day': 7,
+        'price': float(predicted_price_7d)
     })
+    
+    # Confiance basée sur R² test
+    confidence = max(0, min(1, metrics['r2_test']))
     
     prediction = {
         'coin': coin_id,
         'current_price': current_price,
-        'predicted_price': predicted_price,
-        'price_change': price_change,
+        'predicted_price': predicted_price_7d,
+        'price_change': price_change_7d,
+        'timeframe': '7 days',
         'signal': signal,
         'market_data': {
             'high_24h': float(market_data.get('high_24h', current_price * 1.05)),
@@ -187,33 +285,37 @@ def make_prediction(model, X_scaled, scaler, close_prices, market_data, coin_id)
             'market_cap': float(market_data.get('market_cap', 0) or 0)
         },
         'historical_data': historical_data,
-        'r_squared': 0.75,
+        'r_squared': confidence,
+        'model_type': 'Gradient Boosting',
+        'features_count': 19,
         'timestamp': datetime.now().isoformat()
     }
     
     print(f"   💰 Prix actuel: ${current_price:,.2f}")
-    print(f"   🎯 Prix demain: ${predicted_price:,.2f}")
-    print(f"   📊 Variation: {price_change:+.2f}%")
+    print(f"   🎯 Prix dans 7 jours: ${predicted_price_7d:,.2f}")
+    print(f"   📊 Variation: {price_change_7d:+.2f}%")
     print(f"   🚦 Signal: {signal}")
+    print(f"   📈 Confiance: {confidence*100:.1f}%")
     
     return prediction
 
 def main():
     print("=" * 60)
-    print("🤖 MODÈLE IA - CoinGecko Method")
+    print("🤖 MODÈLE IA PRO - Gradient Boosting")
     print("=" * 60)
     print()
     
     try:
         ohlc_data, market_data, coin_id = load_data()
-        X_scaled, y, scaler, close_prices = prepare_data(ohlc_data)
-        model, metrics = train_model(X_scaled, y)
-        prediction = make_prediction(model, X_scaled, scaler, close_prices, market_data, coin_id)
+        X, y, feature_cols, close_prices, df = prepare_data(ohlc_data)
+        model, scaler, metrics = train_model(X, y)
+        prediction = make_prediction(model, scaler, X, close_prices, market_data, coin_id, metrics)
         
         prediction['model_metrics'] = {
             'r2_score': metrics['r2_test'],
-            'mse': metrics['mse'],
-            'mae': metrics['mae']
+            'mape': metrics['mape'],
+            'mae': metrics['mae'],
+            'rmse': metrics['rmse']
         }
         
         print()
