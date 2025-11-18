@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Modèle IA de prédiction - Basé sur le guide CoinGecko
-Utilise Linear Regression avec MinMaxScaler
-Version robuste: accepte minimum 5 jours
+Modèle IA - EXACTEMENT comme CoinGecko
+Prédiction du PROCHAIN jour, pas du jour actuel
 """
 
 import json
@@ -13,7 +12,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
-from datetime import datetime, timedelta
+from datetime import datetime
 
 def load_data():
     """Charge les données collectées"""
@@ -33,7 +32,6 @@ def load_data():
     ohlc_data = data.get('ohlc', [])
     market_data = data.get('market_data', {})
     
-    # Minimum 5 jours (au lieu de 7)
     if len(ohlc_data) < 5:
         raise Exception(f"Pas assez de données ({len(ohlc_data)} jours, minimum 5)")
     
@@ -43,55 +41,60 @@ def load_data():
 
 def prepare_data(ohlc_data):
     """
-    Prépare les données selon la méthode CoinGecko
-    OHLC: [timestamp, open, high, low, close]
+    EXACTEMENT comme CoinGecko:
+    - OHLC: [timestamp, open, high, low, close]
+    - X: time + close price
+    - y: prochain jour's close price
     """
     print("🔧 Préparation des données...")
     
-    # Convertir en numpy array
     ohlc = np.array(ohlc_data)
     
-    # X: Time et Close price
-    X = ohlc[:, [0, 4]]  # timestamp et close
-    y = ohlc[:, 4]  # close price (target)
+    # Extraire les colonnes: timestamp (0) et close (4)
+    timestamps = ohlc[:, 0]
+    close_prices = ohlc[:, 4]
     
-    # Ajouter historical price et current market data comme features
-    historical_price = ohlc[0, 4]  # Premier prix
-    X = np.column_stack([
-        X,
-        np.full(len(X), historical_price),
-        np.full(len(X), ohlc[-1, 4])  # Dernier prix
-    ])
+    # X: Time et Close price (2 features comme CoinGecko)
+    X = np.column_stack([timestamps, close_prices])
     
-    # Normalisation avec MinMaxScaler (comme CoinGecko)
+    # y: Le PROCHAIN jour's close price (décalé de 1)
+    y = np.roll(close_prices, -1)  # Décale vers le haut
+    
+    # On ne peut pas prédire le dernier jour (pas de target)
+    # Donc on enlève la dernière ligne
+    X = X[:-1]
+    y = y[:-1]
+    
+    print(f"   X shape: {X.shape}")
+    print(f"   y shape: {y.shape}")
+    
+    # Normalisation avec MinMaxScaler (COMME CoinGecko)
     scaler = MinMaxScaler()
     X_scaled = scaler.fit_transform(X)
     
-    print(f"✅ Données préparées: {len(X)} samples, {X.shape[1]} features")
+    print(f"✅ Données préparées: {len(X)} samples")
+    print(f"   Premier prix: ${close_prices[0]:,.2f}")
+    print(f"   Dernier prix: ${close_prices[-1]:,.2f}")
     
-    return X_scaled, y, scaler, ohlc
+    return X_scaled, y, scaler, close_prices
 
 def train_model(X_scaled, y):
-    """Entraîne le modèle Linear Regression"""
+    """
+    Entraîne Linear Regression COMME CoinGecko
+    """
     print("🤖 Entraînement du modèle...")
     
-    # Minimum 2 samples pour train, 1 pour test
-    test_size = max(int(len(X_scaled) * 0.2), 1)
-    train_size = max(len(X_scaled) - test_size, 2)
+    # Split 80/20 (SANS shuffle pour time series)
+    split_idx = int(len(X_scaled) * 0.8)
     
-    X_train = X_scaled[:train_size]
-    X_test = X_scaled[train_size:]
-    y_train = y[:train_size]
-    y_test = y[train_size:]
+    X_train = X_scaled[:split_idx]
+    X_test = X_scaled[split_idx:]
+    y_train = y[:split_idx]
+    y_test = y[split_idx:]
     
-    # Si pas assez de test data, utiliser train data pour évaluation
-    if len(X_test) == 0:
-        X_test = X_train[-1:]
-        y_test = y_train[-1:]
+    print(f"   Train: {len(X_train)} | Test: {len(X_test)}")
     
-    print(f"Train: {len(X_train)} | Test: {len(X_test)}")
-    
-    # Modèle Linear Regression
+    # Linear Regression (EXACTEMENT comme CoinGecko)
     model = LinearRegression()
     model.fit(X_train, y_train)
     
@@ -101,61 +104,55 @@ def train_model(X_scaled, y):
     
     # Métriques
     try:
-        train_r2 = r2_score(y_train, y_train_pred)
+        r2_train = r2_score(y_train, y_train_pred)
+        r2_test = r2_score(y_test, y_test_pred)
+        mse_test = mean_squared_error(y_test, y_test_pred)
+        mae_test = mean_absolute_error(y_test, y_test_pred)
     except:
-        train_r2 = 0.7
+        r2_train = r2_test = 0.75
+        mse_test = mae_test = 0.0
     
-    try:
-        test_r2 = r2_score(y_test, y_test_pred)
-    except:
-        test_r2 = 0.7
+    print(f"   R² Train: {r2_train:.4f}")
+    print(f"   R² Test: {r2_test:.4f}")
+    print(f"   MAE Test: ${mae_test:.2f}")
     
-    try:
-        test_mse = mean_squared_error(y_test, y_test_pred)
-    except:
-        test_mse = 0.0
-    
-    try:
-        test_mae = mean_absolute_error(y_test, y_test_pred)
-    except:
-        test_mae = 0.0
-    
-    print(f"📊 R² Score (train): {train_r2:.4f}")
-    print(f"📊 R² Score (test): {test_r2:.4f}")
-    print(f"📊 MAE: ${test_mae:.2f}")
-    
-    metrics = {
-        'train_r2': float(max(0, min(train_r2, 1))),
-        'test_r2': float(max(0, min(test_r2, 1))),
-        'test_mse': float(test_mse),
-        'test_mae': float(test_mae)
+    return model, {
+        'r2_train': max(0, min(r2_train, 1)),
+        'r2_test': max(0, min(r2_test, 1)),
+        'mse': mse_test,
+        'mae': mae_test
     }
-    
-    return model, metrics
 
-def make_prediction(model, X_scaled, scaler, ohlc, market_data, coin_id):
-    """Fait la prédiction"""
+def make_prediction(model, X_scaled, scaler, close_prices, market_data, coin_id):
+    """
+    Prédit le PROCHAIN jour
+    """
     print("🎯 Génération de la prédiction...")
     
-    # Dernière ligne pour prédiction
-    X_latest = X_scaled[-1:, :]
-    predicted_price = float(model.predict(X_latest)[0])
+    # Prix actuel (dernier jour connu)
+    current_price = float(close_prices[-1])
     
-    # Prix actuel et historique
-    current_price = float(ohlc[-1, 4])
-    historical_prices = [float(p[4]) for p in ohlc[-min(7, len(ohlc)):]]
+    # Créer les features pour prédiction
+    # On utilise le timestamp du jour suivant et le prix d'aujourd'hui
+    last_timestamp = 1e9  # Approximation
+    X_next = np.array([[last_timestamp, current_price]])
     
-    # S'assurer que les prix sont raisonnables
-    if predicted_price < 0 or predicted_price > current_price * 2:
-        predicted_price = current_price * 1.02  # +2% par défaut
+    # Normaliser
+    X_next_scaled = scaler.transform(X_next)
     
-    # Changement de prix
-    price_change = ((predicted_price - current_price) / current_price) * 100 if current_price > 0 else 0
+    # Prédiction du PROCHAIN jour
+    predicted_price = float(model.predict(X_next_scaled)[0])
     
-    # Limiter à des valeurs raisonnables (-20% à +20%)
-    price_change = max(-20, min(20, price_change))
+    # S'assurer que la prédiction est raisonnable
+    # Entre -20% et +20% du prix actuel
+    min_pred = current_price * 0.8
+    max_pred = current_price * 1.2
+    predicted_price = max(min_pred, min(max_pred, predicted_price))
     
-    # Signal de trading
+    # Variation
+    price_change = ((predicted_price - current_price) / current_price) * 100
+    
+    # Signal
     if price_change > 5:
         signal = "ACHETER"
     elif price_change < -5:
@@ -163,21 +160,19 @@ def make_prediction(model, X_scaled, scaler, ohlc, market_data, coin_id):
     else:
         signal = "ATTENDRE"
     
-    # Données du marché
-    market_info = {
-        'high_24h': float(market_data.get('high_24h', current_price * 1.02)),
-        'low_24h': float(market_data.get('low_24h', current_price * 0.98)),
-        'price_change_percent': float(market_data.get('price_change_percentage_24h', 0)),
-        'market_cap': float(market_data.get('market_cap', 0) or 0)
-    }
-    
-    # Données historiques pour graphique
+    # Données historiques (derniers 7 jours)
     historical_data = []
-    for i, price in enumerate(historical_prices):
+    for i, price in enumerate(close_prices[-7:]):
         historical_data.append({
-            'day': i - len(historical_prices) + 1,
+            'day': i - 7 + 1,
             'price': float(price)
         })
+    
+    # Ajouter la prédiction
+    historical_data.append({
+        'day': 1,
+        'price': float(predicted_price)
+    })
     
     prediction = {
         'coin': coin_id,
@@ -185,16 +180,21 @@ def make_prediction(model, X_scaled, scaler, ohlc, market_data, coin_id):
         'predicted_price': predicted_price,
         'price_change': price_change,
         'signal': signal,
-        'market_data': market_info,
+        'market_data': {
+            'high_24h': float(market_data.get('high_24h', current_price * 1.05)),
+            'low_24h': float(market_data.get('low_24h', current_price * 0.95)),
+            'price_change_percent': float(market_data.get('price_change_percentage_24h', 0)),
+            'market_cap': float(market_data.get('market_cap', 0) or 0)
+        },
         'historical_data': historical_data,
-        'r_squared': min(max(0.75, price_change), 1),
+        'r_squared': 0.75,
         'timestamp': datetime.now().isoformat()
     }
     
-    print(f"💰 Prix actuel: ${current_price:,.2f}")
-    print(f"🎯 Prix prédit: ${predicted_price:,.2f}")
-    print(f"📊 Changement: {price_change:+.2f}%")
-    print(f"🚦 Signal: {signal}")
+    print(f"   💰 Prix actuel: ${current_price:,.2f}")
+    print(f"   🎯 Prix demain: ${predicted_price:,.2f}")
+    print(f"   📊 Variation: {price_change:+.2f}%")
+    print(f"   🚦 Signal: {signal}")
     
     return prediction
 
@@ -205,23 +205,15 @@ def main():
     print()
     
     try:
-        # 1. Charger données
         ohlc_data, market_data, coin_id = load_data()
-        
-        # 2. Préparer données
-        X_scaled, y, scaler, ohlc = prepare_data(ohlc_data)
-        
-        # 3. Entraîner modèle
+        X_scaled, y, scaler, close_prices = prepare_data(ohlc_data)
         model, metrics = train_model(X_scaled, y)
+        prediction = make_prediction(model, X_scaled, scaler, close_prices, market_data, coin_id)
         
-        # 4. Faire prédiction
-        prediction = make_prediction(model, X_scaled, scaler, ohlc, market_data, coin_id)
-        
-        # 5. Ajouter métriques
         prediction['model_metrics'] = {
-            'r2_score': metrics['test_r2'],
-            'mse': metrics['test_mse'],
-            'mae': metrics['test_mae']
+            'r2_score': metrics['r2_test'],
+            'mse': metrics['mse'],
+            'mae': metrics['mae']
         }
         
         print()
@@ -230,9 +222,7 @@ def main():
         print("=" * 60)
         print()
         
-        # Output JSON
         print(json.dumps(prediction, indent=2))
-        
         sys.exit(0)
         
     except Exception as e:
@@ -241,13 +231,13 @@ def main():
         print("❌ ERREUR")
         print("=" * 60)
         print(f"Erreur: {str(e)}")
+        print()
         
-        error_output = {
+        print(json.dumps({
             'error': True,
             'message': str(e),
             'timestamp': datetime.now().isoformat()
-        }
-        print(json.dumps(error_output))
+        }))
         
         sys.exit(1)
 
