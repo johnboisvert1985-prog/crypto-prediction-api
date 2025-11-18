@@ -4,7 +4,7 @@
   "description": "Système de prédiction de prix crypto avec IA - TOP 250 cryptomonnaies",
   "main": "index.js",
   "scripts": {
-    "start": "node generate_cryptos.js && node index.js",
+    "start": "node index.js",
     "dev": "nodemon index.js"
   },
   "keywords": [
