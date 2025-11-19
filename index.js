@@ -355,7 +355,7 @@ app.get('/api/predict/:coinId', async (req, res) => {
         console.log(`⏱️  Timeout: 60 secondes`);
 
         const prediction = await new Promise((resolve, reject) => {
-            modelProcess = spawn('python3', ['ai_model_v2.py'], {
+            modelProcess = spawn('python3', ['ai_model_v3.py'], {
                 timeout: 60000
             });
             
