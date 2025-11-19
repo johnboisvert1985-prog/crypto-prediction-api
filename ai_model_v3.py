@@ -20,12 +20,15 @@ warnings.filterwarnings('ignore')
 
 def load_data():
     """Charge les données collectées"""
+    import os
+    
     data_files = glob.glob("data_*.json")
     
     if not data_files:
         raise Exception("Aucun fichier de données trouvé")
     
-    latest_file = max(data_files, key=lambda x: x)
+    # ✅ CORRIGÉ: Prendre le fichier le plus RÉCENT (par date de modification)
+    latest_file = max(data_files, key=lambda x: os.path.getmtime(x))
     print(f"📂 Chargement: {latest_file}")
     
     with open(latest_file, 'r') as f:
