@@ -1,8 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const fetch = require('node-fetch');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -18,58 +17,75 @@ console.log(`\n${'='.repeat(60)}`);
 console.log(`🚀 SERVEUR DE PRÉDICTION CRYPTO V2.1`);
 console.log(`${'='.repeat(60)}\n`);
 
-// Charger le cache statique au démarrage
-function loadStaticCache() {
-    try {
-        const cacheFile = path.join(__dirname, 'cryptos.json');
-        console.log(`📂 Chemin: ${cacheFile}`);
-        console.log(`📂 Exists: ${fs.existsSync(cacheFile)}`);
-        
-        if (fs.existsSync(cacheFile)) {
-            const data = fs.readFileSync(cacheFile, 'utf8');
-            cryptoListCache = JSON.parse(data);
-            console.log(`✅ Cache chargé: ${cryptoListCache.total} cryptos`);
-            console.log(`   Premiers: ${cryptoListCache.cryptos.slice(0, 3).map(c => c.name).join(', ')}`);
-            return true;
-        } else {
-            console.warn('⚠️  cryptos.json introuvable - fallback minimal');
-        }
-    } catch (error) {
-        console.error('❌ Erreur:', error.message);
-    }
+// Générer les 250 cryptos au démarrage
+async function initializeCryptos() {
+    console.log('📥 Initialisation des cryptos...');
     
-    // Fallback minimal
-    cryptoListCache = {
-        cryptos: [
-            {"id": "bitcoin", "symbol": "BTC", "name": "Bitcoin", "rank": 1, "price": 91471.52, "market_cap": 1824134320935, "price_change_24h": -3.42, "image": "https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png?1696501400"},
-            {"id": "ethereum", "symbol": "ETH", "name": "Ethereum", "rank": 2, "price": 3065.81, "market_cap": 369763275504, "price_change_24h": -3.03, "image": "https://coin-images.coingecko.com/coins/images/279/large/ethereum.png?1696501628"},
-            {"id": "tether", "symbol": "USDT", "name": "Tether", "rank": 3, "price": 0.998937, "market_cap": 183838708667, "price_change_24h": -0.02, "image": "https://coin-images.coingecko.com/coins/images/325/large/Tether.png?1696501661"},
-            {"id": "ripple", "symbol": "XRP", "name": "XRP", "rank": 4, "price": 2.18, "market_cap": 131220666511, "price_change_24h": -3.98, "image": "https://coin-images.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png?1696501442"},
-            {"id": "binancecoin", "symbol": "BNB", "name": "BNB", "rank": 5, "price": 917.27, "market_cap": 126446199641, "price_change_24h": -0.17, "image": "https://coin-images.coingecko.com/coins/images/825/large/bnb-icon2_2x.png?1696501970"}
-        ],
-        total: 5
-    };
-    console.log('📦 Mode fallback: 5 cryptos');
-    return true;
+    try {
+        console.log('🔄 Récupération des 250 cryptos de CoinGecko...');
+        
+        const response = await fetch(
+            'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false',
+            { timeout: 30000 }
+        );
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Formater les données
+        const cryptos = data.map((crypto, index) => ({
+            id: crypto.id,
+            symbol: crypto.symbol.toUpperCase(),
+            name: crypto.name,
+            rank: index + 1,
+            price: crypto.current_price,
+            market_cap: crypto.market_cap,
+            price_change_24h: crypto.price_change_percentage_24h,
+            image: crypto.image
+        }));
+        
+        cryptoListCache = {
+            cryptos,
+            total: cryptos.length
+        };
+        
+        console.log(`✅ ${cryptos.length} cryptos chargées avec succès!`);
+        return true;
+        
+    } catch (error) {
+        console.error(`⚠️  Erreur: ${error.message}`);
+        console.log('📦 Utilisation du cache de secours (5 cryptos)...');
+        
+        // Fallback: 5 cryptos
+        cryptoListCache = {
+            cryptos: [
+                {"id": "bitcoin", "symbol": "BTC", "name": "Bitcoin", "rank": 1, "price": 91471.52, "market_cap": 1824134320935, "price_change_24h": -3.42, "image": "https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png?1696501400"},
+                {"id": "ethereum", "symbol": "ETH", "name": "Ethereum", "rank": 2, "price": 3065.81, "market_cap": 369763275504, "price_change_24h": -3.03, "image": "https://coin-images.coingecko.com/coins/images/279/large/ethereum.png?1696501628"},
+                {"id": "tether", "symbol": "USDT", "name": "Tether", "rank": 3, "price": 0.998937, "market_cap": 183838708667, "price_change_24h": -0.02, "image": "https://coin-images.coingecko.com/coins/images/325/large/Tether.png?1696501661"},
+                {"id": "ripple", "symbol": "XRP", "name": "XRP", "rank": 4, "price": 2.18, "market_cap": 131220666511, "price_change_24h": -3.98, "image": "https://coin-images.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png?1696501442"},
+                {"id": "binancecoin", "symbol": "BNB", "name": "BNB", "rank": 5, "price": 917.27, "market_cap": 126446199641, "price_change_24h": -0.17, "image": "https://coin-images.coingecko.com/coins/images/825/large/bnb-icon2_2x.png?1696501970"}
+            ],
+            total: 5
+        };
+        
+        return false;
+    }
 }
 
-// Charger le cache au démarrage
-console.log('🔄 Initialisation du cache...');
-loadStaticCache();
-
 // ============================================================================
-// ENDPOINT: Liste des TOP 250 cryptos
+// ENDPOINT: Liste des cryptos
 // ============================================================================
-app.get('/api/crypto-list', async (req, res) => {
+app.get('/api/crypto-list', (req, res) => {
     try {
-        // Retourner le cache statique (toujours disponible)
         if (cryptoListCache) {
-            console.log('📦 Retour de la liste depuis le cache statique');
             return res.json(cryptoListCache);
         }
         
         throw new Error('Cache non disponible');
-
+        
     } catch (error) {
         console.error('❌ Erreur:', error.message);
         res.status(500).json({
@@ -225,7 +241,7 @@ app.get('/api/health', (req, res) => {
     res.json({
         status: 'online',
         timestamp: new Date().toISOString(),
-        cache: cryptoListCache ? `${cryptoListCache.cryptos.length} cryptos` : 'empty',
+        cache: cryptoListCache ? `${cryptoListCache.total} cryptos` : 'empty',
         version: '2.1 - Gradient Boosting'
     });
 });
@@ -233,11 +249,19 @@ app.get('/api/health', (req, res) => {
 // ============================================================================
 // Démarrage du serveur
 // ============================================================================
-app.listen(PORT, () => {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`🌐 Serveur écoute sur: http://localhost:${PORT}`);
-    console.log(`📊 Liste cryptos: http://localhost:${PORT}/api/crypto-list`);
-    console.log(`🔮 Prédiction: http://localhost:${PORT}/api/predict/bitcoin`);
-    console.log(`❤️  Santé: http://localhost:${PORT}/api/health`);
-    console.log(`${'='.repeat(60)}\n`);
-});
+async function start() {
+    // Initialiser les cryptos au démarrage
+    await initializeCryptos();
+    
+    // Démarrer le serveur
+    app.listen(PORT, () => {
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`🌐 Serveur écoute sur: http://localhost:${PORT}`);
+        console.log(`📊 Liste cryptos: http://localhost:${PORT}/api/crypto-list`);
+        console.log(`🔮 Prédiction: http://localhost:${PORT}/api/predict/bitcoin`);
+        console.log(`❤️  Santé: http://localhost:${PORT}/api/health`);
+        console.log(`${'='.repeat(60)}\n`);
+    });
+}
+
+start();
