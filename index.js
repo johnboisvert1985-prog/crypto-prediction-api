@@ -308,7 +308,7 @@ app.get('/api/predict/:coinId', async (req, res) => {
         console.log(`⏱️  Timeout: 120 secondes`);
 
         const collectOutput = await new Promise((resolve, reject) => {
-            collectProcess = spawn('python3', ['collect_data_v2.py', coinId], {
+            collectProcess = spawn('python3', ['collect_data_v3.py', coinId], {
                 timeout: 120000
             });
             
