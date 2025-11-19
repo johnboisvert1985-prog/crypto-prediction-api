@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Collecte de données V4 - Multi-API avec fallbacks géo-résistants
-CoinGecko → CoinCap → Kraken → Cache
+Collecte de données V5 - 100+ cryptos + Fallback intelligent
+CoinGecko → CoinCap (100+ mappings) → Kraken → CoinGecko fallback → Cache
 """
 
 import requests
@@ -12,7 +12,7 @@ import time
 import os
 from datetime import datetime, timedelta
 
-class DataCollectorMultiAPI:
+class DataCollectorV5:
     def __init__(self, coin_id, days=30):
         self.coin_id = coin_id.lower()
         self.days = days
@@ -30,44 +30,59 @@ class DataCollectorMultiAPI:
         self.min_delay = 1.0
         self.last_request_time = 0
         
-        # Mapping CoinGecko ID → CoinCap ID
+        # ✅ TOP 100+ CRYPTOS - Mapping CoinGecko → CoinCap
         self.coincap_mapping = {
-            'bitcoin': 'bitcoin',
-            'ethereum': 'ethereum',
-            'binancecoin': 'binance-coin',
-            'ripple': 'xrp',
-            'cardano': 'cardano',
-            'solana': 'solana',
-            'dogecoin': 'dogecoin',
-            'tron': 'tron',
-            'polkadot': 'polkadot',
-            'polygon': 'polygon',
-            'litecoin': 'litecoin',
-            'shiba-inu': 'shiba-inu',
-            'avalanche-2': 'avalanche',
-            'chainlink': 'chainlink',
-            'uniswap': 'uniswap',
-            'cosmos': 'cosmos',
-            'stellar': 'stellar',
-            'monero': 'monero',
+            'bitcoin': 'bitcoin', 'ethereum': 'ethereum', 'tether': 'tether',
+            'binancecoin': 'binance-coin', 'solana': 'solana', 'ripple': 'xrp',
+            'usd-coin': 'usd-coin', 'cardano': 'cardano', 'dogecoin': 'dogecoin',
+            'tron': 'tron', 'avalanche-2': 'avalanche', 'chainlink': 'chainlink',
+            'shiba-inu': 'shiba-inu', 'polkadot': 'polkadot', 'bitcoin-cash': 'bitcoin-cash',
+            'uniswap': 'uniswap', 'litecoin': 'litecoin', 'near': 'near-protocol',
+            'leo-token': 'leo-token', 'polygon': 'polygon', 'dai': 'multi-collateral-dai',
+            'wrapped-bitcoin': 'wrapped-bitcoin', 'internet-computer': 'internet-computer',
+            'kaspa': 'kaspa', 'ethereum-classic': 'ethereum-classic', 'aptos': 'aptos',
+            'monero': 'monero', 'stellar': 'stellar', 'okb': 'okb',
+            'render-token': 'render-token', 'immutable-x': 'immutable-x', 'cosmos': 'cosmos',
+            'arbitrum': 'arbitrum', 'filecoin': 'filecoin', 'mantle': 'mantle',
+            'first-digital-usd': 'first-digital-usd', 'crypto-com-chain': 'crypto-com-coin',
+            'hedera-hashgraph': 'hedera-hashgraph', 'vechain': 'vechain', 'blockstack': 'blockstack',
+            'optimism': 'optimism', 'injective-protocol': 'injective', 'maker': 'maker',
+            'aave': 'aave', 'algorand': 'algorand', 'bittorrent': 'bittorrent',
+            'theta-token': 'theta-network', 'sui': 'sui', 'the-graph': 'the-graph',
+            'quant-network': 'quant', 'fantom': 'fantom', 'sei-network': 'sei',
+            'celestia': 'celestia', 'eos': 'eos', 'tezos': 'tezos',
+            'flow': 'flow', 'flare-networks': 'flare', 'kucoin-shares': 'kucoin-token',
+            'true-usd': 'trueusd', 'gatetoken': 'gatechain-token', 'thorchain': 'thorchain',
+            'beam': 'beam', 'bitget-token': 'bitget-token', 'neo': 'neo',
+            'iota': 'iota', 'axie-infinity': 'axie-infinity', 'the-sandbox': 'the-sandbox',
+            'kaia': 'kaia', 'zcash': 'zcash', 'decentraland': 'decentraland',
+            'elrond-erd-2': 'elrond', 'compound': 'compound-coin', 'ecash': 'ecash',
+            'pyth-network': 'pyth-network', 'wemix': 'wemix', 'arweave': 'arweave',
+            'jasmycoin': 'jasmy', 'pancakeswap-token': 'pancakeswap', 'helium': 'helium',
+            'curve-dao-token': 'curve-dao-token', 'usdd': 'usdd', 'ondo-finance': 'ondo',
+            'terra-luna': 'terra-luna', 'conflux-token': 'conflux-network', 'gala': 'gala',
+            'pendle': 'pendle', 'fetch-ai': 'fetch', 'raydium': 'raydium',
+            'synthetix-network-token': 'synthetix-network-token', 'nexo': 'nexo',
+            'ethereum-name-service': 'ethereum-name-service', 'blur': 'blur', 'zilliqa': 'zilliqa',
+            'lido-dao': 'lido-dao', 'pax-dollar': 'paxos-standard', 'jito': 'jito',
+            'rocket-pool': 'rocket-pool', 'coreum': 'coreum', 'dydx-chain': 'dydx',
+            'reserve-rights-token': 'reserve-rights-token', 'jupiter': 'jupiter',
+            'trust-wallet-token': 'trust-wallet-token',
         }
         
-        # Mapping CoinGecko ID → Kraken Symbol
+        # Kraken mappings (30+ cryptos)
         self.kraken_mapping = {
-            'bitcoin': 'XXBTZUSD',
-            'ethereum': 'XETHZUSD',
-            'ripple': 'XXRPZUSD',
-            'cardano': 'ADAUSD',
-            'solana': 'SOLUSD',
-            'dogecoin': 'XDGUSD',
-            'polkadot': 'DOTUSD',
-            'polygon': 'MATICUSD',
-            'litecoin': 'XLTCZUSD',
-            'avalanche-2': 'AVAXUSD',
-            'chainlink': 'LINKUSD',
-            'uniswap': 'UNIUSD',
-            'cosmos': 'ATOMUSD',
-            'stellar': 'XXLMZUSD',
+            'bitcoin': 'XXBTZUSD', 'ethereum': 'XETHZUSD', 'tether': 'USDTZUSD',
+            'ripple': 'XXRPZUSD', 'cardano': 'ADAUSD', 'solana': 'SOLUSD',
+            'dogecoin': 'XDGUSD', 'polkadot': 'DOTUSD', 'polygon': 'MATICUSD',
+            'litecoin': 'XLTCZUSD', 'avalanche-2': 'AVAXUSD', 'chainlink': 'LINKUSD',
+            'uniswap': 'UNIUSD', 'cosmos': 'ATOMUSD', 'stellar': 'XXLMZUSD',
+            'ethereum-classic': 'XETCZUSD', 'algorand': 'ALGOUSD', 'filecoin': 'FILUSD',
+            'near': 'NEARUSD', 'optimism': 'OPUSD', 'arbitrum': 'ARBUSD',
+            'zcash': 'ZECUSD', 'aave': 'AAVEUSD', 'maker': 'MKRUSD',
+            'the-graph': 'GRTUSD', 'tezos': 'XTZUSD', 'eos': 'EOSUSD',
+            'compound': 'COMPUSD', 'quant-network': 'QNTUSD', 'injective-protocol': 'INJUSD',
+            'render-token': 'RNDRXUSD',
         }
     
     def cache_valide(self):
@@ -110,7 +125,6 @@ class DataCollectorMultiAPI:
         for tentative in range(max_tentatives):
             try:
                 self._respecter_rate_limit()
-                print(f"🔄 Requête {source}: {url.split('/')[-1]}")
                 
                 response = requests.get(
                     url,
@@ -120,28 +134,26 @@ class DataCollectorMultiAPI:
                 )
                 
                 if response.status_code == 429:
-                    print(f"⚠️  Rate limit {source} (429)")
                     raise Exception("Rate limit")
                 
                 if response.status_code == 451:
-                    print(f"⚠️  Geo-blocked {source} (451)")
                     raise Exception("Geo-blocked")
                 
                 if response.status_code != 200:
                     raise Exception(f"HTTP {response.status_code}")
                 
-                print(f"✅ Succès {source}!")
                 return response.json()
                 
             except Exception as e:
-                print(f"⚠️  {source} erreur: {str(e)}")
                 if tentative < max_tentatives - 1:
                     time.sleep(2)
+                else:
+                    raise e
         
         raise Exception(f"{source} indisponible")
     
     # =========================================================================
-    # COINCAP API - Gratuite, illimitée, pas de geo-block!
+    # COINCAP API
     # =========================================================================
     def telecharger_ohlc_coincap(self):
         """Télécharge OHLC depuis CoinCap"""
@@ -149,45 +161,29 @@ class DataCollectorMultiAPI:
         
         coincap_id = self.coincap_mapping.get(self.coin_id)
         if not coincap_id:
-            raise Exception(f"{self.coin_id} non disponible sur CoinCap")
+            raise Exception(f"Non disponible sur CoinCap")
         
-        print(f"   ID CoinCap: {coincap_id}")
+        print(f"   ID: {coincap_id}")
         
-        # CoinCap utilise des intervalles (d1 = 1 jour)
         end_time = int(time.time() * 1000)
         start_time = end_time - (self.days * 24 * 60 * 60 * 1000)
         
         url = f"{self.coincap_base}/assets/{coincap_id}/history"
-        params = {
-            'interval': 'd1',
-            'start': start_time,
-            'end': end_time
-        }
+        params = {'interval': 'd1', 'start': start_time, 'end': end_time}
         
         data = self._faire_requete(url, params, source="CoinCap")
         
         if 'data' not in data:
-            raise Exception("Pas de données OHLC")
-        
-        # Convertir format CoinCap → format CoinGecko
-        # CoinCap: {time, priceUsd, date}
-        # CoinGecko: [timestamp, open, high, low, close]
+            raise Exception("Pas de données")
         
         ohlc_formatted = []
-        prices = [float(item['priceUsd']) for item in data['data']]
-        
-        for i, item in enumerate(data['data']):
+        for item in data['data']:
             price = float(item['priceUsd'])
-            # Approximation: open=close=high=low (CoinCap ne donne que le prix)
             ohlc_formatted.append([
-                item['time'],  # timestamp
-                price,         # open (approximation)
-                price * 1.02,  # high (approximation +2%)
-                price * 0.98,  # low (approximation -2%)
-                price          # close
+                item['time'], price, price * 1.02, price * 0.98, price
             ])
         
-        print(f"✅ {len(ohlc_formatted)} jours CoinCap")
+        print(f"✅ {len(ohlc_formatted)} jours")
         return ohlc_formatted
     
     def get_prix_actuel_coincap(self):
@@ -196,13 +192,13 @@ class DataCollectorMultiAPI:
         
         coincap_id = self.coincap_mapping.get(self.coin_id)
         if not coincap_id:
-            raise Exception("Crypto non disponible")
+            raise Exception("Non disponible")
         
         url = f"{self.coincap_base}/assets/{coincap_id}"
         data = self._faire_requete(url, source="CoinCap")
         
         if 'data' not in data:
-            raise Exception("Pas de données prix")
+            raise Exception("Pas de données")
         
         asset = data['data']
         
@@ -214,11 +210,11 @@ class DataCollectorMultiAPI:
             'source': 'coincap'
         }
         
-        print(f"✅ Prix CoinCap: ${result['current_price']:,.2f}")
+        print(f"✅ ${result['current_price']:,.4f}")
         return result
     
     # =========================================================================
-    # KRAKEN API - Gratuite, illimitée, pas de geo-block!
+    # KRAKEN API
     # =========================================================================
     def telecharger_ohlc_kraken(self):
         """Télécharge OHLC depuis Kraken"""
@@ -226,42 +222,32 @@ class DataCollectorMultiAPI:
         
         kraken_symbol = self.kraken_mapping.get(self.coin_id)
         if not kraken_symbol:
-            raise Exception(f"{self.coin_id} non disponible sur Kraken")
+            raise Exception(f"Non disponible sur Kraken")
         
-        print(f"   Symbole Kraken: {kraken_symbol}")
+        print(f"   Symbole: {kraken_symbol}")
         
-        # Kraken OHLC endpoint
         url = f"{self.kraken_base}/OHLC"
-        params = {
-            'pair': kraken_symbol,
-            'interval': 1440  # 1440 minutes = 1 jour
-        }
+        params = {'pair': kraken_symbol, 'interval': 1440}
         
         data = self._faire_requete(url, params, source="Kraken")
         
         if 'error' in data and data['error']:
-            raise Exception(f"Erreur Kraken: {data['error']}")
+            raise Exception(f"Erreur: {data['error']}")
         
         if 'result' not in data:
-            raise Exception("Pas de données OHLC")
+            raise Exception("Pas de données")
         
-        # Le résultat est dans data['result'][pair_name]
         pair_data = list(data['result'].values())[0]
         
-        # Format Kraken: [time, open, high, low, close, vwap, volume, count]
-        # Convertir → [timestamp_ms, open, high, low, close]
-        
         ohlc_formatted = []
-        for candle in pair_data[-self.days:]:  # Garder seulement les N derniers jours
+        for candle in pair_data[-self.days:]:
             ohlc_formatted.append([
-                int(candle[0]) * 1000,  # timestamp en ms
-                float(candle[1]),       # open
-                float(candle[2]),       # high
-                float(candle[3]),       # low
-                float(candle[4])        # close
+                int(candle[0]) * 1000,
+                float(candle[1]), float(candle[2]),
+                float(candle[3]), float(candle[4])
             ])
         
-        print(f"✅ {len(ohlc_formatted)} jours Kraken")
+        print(f"✅ {len(ohlc_formatted)} jours")
         return ohlc_formatted
     
     def get_prix_actuel_kraken(self):
@@ -270,23 +256,18 @@ class DataCollectorMultiAPI:
         
         kraken_symbol = self.kraken_mapping.get(self.coin_id)
         if not kraken_symbol:
-            raise Exception("Symbol non disponible")
+            raise Exception("Non disponible")
         
-        # Ticker endpoint
         url = f"{self.kraken_base}/Ticker"
         params = {'pair': kraken_symbol}
         
         data = self._faire_requete(url, params, source="Kraken")
         
         if 'result' not in data:
-            raise Exception("Pas de données ticker")
+            raise Exception("Pas de données")
         
         ticker = list(data['result'].values())[0]
-        
-        # ticker['c'] = [price, lot volume]
         current_price = float(ticker['c'][0])
-        
-        # Calculer le changement 24h
         open_price = float(ticker['o'])
         change_24h = ((current_price - open_price) / open_price) * 100
         
@@ -300,14 +281,14 @@ class DataCollectorMultiAPI:
             'source': 'kraken'
         }
         
-        print(f"✅ Prix Kraken: ${result['current_price']:,.2f}")
+        print(f"✅ ${result['current_price']:,.2f}")
         return result
     
     # =========================================================================
-    # COINGECKO (si pas rate limit)
+    # COINGECKO (priorité basse, fallback)
     # =========================================================================
     def telecharger_ohlc_coingecko(self):
-        """Télécharge OHLC depuis CoinGecko"""
+        """Télécharge OHLC depuis CoinGecko (fallback)"""
         print(f"📥 [COINGECKO] Téléchargement OHLC...")
         
         url = f"{self.coingecko_base}/coins/{self.coin_id}/ohlc"
@@ -318,11 +299,11 @@ class DataCollectorMultiAPI:
         if not data or len(data) < 7:
             raise Exception("Pas assez de données")
         
-        print(f"✅ {len(data)} jours CoinGecko")
+        print(f"✅ {len(data)} jours")
         return data
     
     def get_prix_actuel_coingecko(self):
-        """Prix actuel depuis CoinGecko"""
+        """Prix actuel depuis CoinGecko (fallback)"""
         print(f"💰 [COINGECKO] Prix actuel...")
         
         url = f"{self.coingecko_base}/simple/price"
@@ -348,35 +329,35 @@ class DataCollectorMultiAPI:
         }
     
     # =========================================================================
-    # LOGIQUE PRINCIPALE avec FALLBACKS
+    # ✅ LOGIQUE PRINCIPALE avec FALLBACK INTELLIGENT
     # =========================================================================
     def collecter_donnees(self):
-        """Collecte avec fallbacks intelligents"""
+        """Collecte avec fallbacks optimisés"""
         print(f"\n{'='*60}")
-        print(f"🔄 COLLECTE MULTI-API - {self.coin_id.upper()}")
+        print(f"🔄 COLLECTE V5 - {self.coin_id.upper()}")
         print(f"{'='*60}\n")
         
-        # 1. Vérifier le cache
+        # 1. Cache valide?
         if self.cache_valide():
             cache = self.charger_cache()
             if cache and 'ohlc' in cache:
                 print(f"✅ Cache utilisé\n")
                 return cache
         
-        # 2. Essayer les APIs dans l'ordre
+        # 2. Ordre des sources (optimisé)
         sources = [
-            ('CoinGecko', self.telecharger_ohlc_coingecko, self.get_prix_actuel_coingecko),
             ('CoinCap', self.telecharger_ohlc_coincap, self.get_prix_actuel_coincap),
             ('Kraken', self.telecharger_ohlc_kraken, self.get_prix_actuel_kraken),
+            ('CoinGecko', self.telecharger_ohlc_coingecko, self.get_prix_actuel_coingecko),
         ]
         
         for source_name, get_ohlc, get_price in sources:
             try:
-                print(f"🎯 Tentative {source_name}...\n")
+                print(f"🎯 {source_name}...\n")
                 ohlc_data = get_ohlc()
                 market_data = get_price()
                 
-                print(f"\n✅ {source_name} utilisé avec succès!\n")
+                print(f"\n✅ {source_name} OK!\n")
                 
                 # Sauvegarder
                 data_output = {
@@ -388,26 +369,24 @@ class DataCollectorMultiAPI:
                     "source": source_name.lower()
                 }
                 
-                # Cache
                 with open(self.cache_file, 'w') as f:
                     json.dump(data_output, f, indent=2)
                 
-                # Data file
                 filename = f"data_{self.coin_id}.json"
                 with open(filename, 'w') as f:
                     json.dump(data_output, f, indent=2)
                 
-                print(f"💾 Données sauvegardées")
-                print(f"📊 Source: {source_name.upper()}")
-                print(f"📊 Prix: ${market_data['current_price']:,.2f}\n")
+                print(f"💾 Sauvegardé")
+                print(f"📊 {source_name.upper()}")
+                print(f"💰 ${market_data['current_price']:,.4f}\n")
                 
                 return data_output
                 
             except Exception as e:
-                print(f"⚠️  {source_name} échoué: {str(e)}\n")
+                print(f"⚠️  {source_name}: {str(e)}\n")
         
-        # 3. Dernier recours: cache expiré
-        print(f"📦 Tentative cache expiré...\n")
+        # 3. Cache expiré en dernier recours
+        print(f"📦 Cache expiré...\n")
         cache = self.charger_cache()
         if cache and 'ohlc' in cache:
             print(f"⚠️  Cache expiré utilisé\n")
@@ -417,21 +396,21 @@ class DataCollectorMultiAPI:
 
 def main():
     if len(sys.argv) < 2:
-        print("❌ Usage: python collect_data_v4.py <coin_id>")
+        print("❌ Usage: python collect_data_v5.py <coin_id>")
         sys.exit(1)
     
     coin_id = sys.argv[1]
     
     try:
-        collector = DataCollectorMultiAPI(coin_id, days=30)
+        collector = DataCollectorV5(coin_id, days=30)
         result = collector.collecter_donnees()
         
         print("="*60)
-        print("✅ COLLECTE RÉUSSIE")
+        print("✅ SUCCÈS")
         print("="*60)
-        print(f"Données: {result['total_days']} jours")
+        print(f"Jours: {result['total_days']}")
         print(f"Source: {result['source'].upper()}")
-        print(f"Prix: ${result['market_data']['current_price']:,.2f}")
+        print(f"Prix: ${result['market_data']['current_price']:,.4f}")
         print()
         
         sys.exit(0)
@@ -439,9 +418,9 @@ def main():
     except Exception as e:
         print()
         print("="*60)
-        print("❌ ERREUR COLLECTE")
+        print("❌ ERREUR")
         print("="*60)
-        print(f"Erreur: {str(e)}")
+        print(f"{str(e)}")
         print()
         sys.exit(1)
 
