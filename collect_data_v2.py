@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Collecte de données avec cache persistant sur disque
-CORRIGÉ: Cache 5 min + Prix actuel en temps réel
+Collecte de données HYBRIDE - CoinGecko + Binance
+Fallback automatique vers Binance si rate limit CoinGecko
 """
 
 import requests
@@ -12,15 +12,75 @@ import time
 import os
 from datetime import datetime, timedelta
 
-class DataCollector:
+class DataCollectorHybrid:
     def __init__(self, coin_id, days=30):
         self.coin_id = coin_id.lower()
         self.days = days
-        self.base_url = "https://api.coingecko.com/api/v3"
+        
+        # CoinGecko
+        self.coingecko_base = "https://api.coingecko.com/api/v3"
+        
+        # Binance
+        self.binance_base = "https://api.binance.com/api/v3"
+        
+        # Cache
         self.cache_file = f"cache_{self.coin_id}.json"
-        self.cache_duration = 5 * 60  # ✅ 5 MINUTES (au lieu de 24h)
+        self.cache_duration = 5 * 60  # 5 minutes
+        
+        # Rate limiting
         self.min_delay = 2.0
         self.last_request_time = 0
+        
+        # Mapping CoinGecko ID → Binance Symbol
+        self.symbol_mapping = {
+            'bitcoin': 'BTCUSDT',
+            'ethereum': 'ETHUSDT',
+            'binancecoin': 'BNBUSDT',
+            'ripple': 'XRPUSDT',
+            'cardano': 'ADAUSDT',
+            'solana': 'SOLUSDT',
+            'dogecoin': 'DOGEUSDT',
+            'tron': 'TRXUSDT',
+            'polkadot': 'DOTUSDT',
+            'polygon': 'MATICUSDT',
+            'litecoin': 'LTCUSDT',
+            'shiba-inu': 'SHIBUSDT',
+            'avalanche-2': 'AVAXUSDT',
+            'chainlink': 'LINKUSDT',
+            'uniswap': 'UNIUSDT',
+            'cosmos': 'ATOMUSDT',
+            'stellar': 'XLMUSDT',
+            'monero': 'XMRUSDT',
+            'ethereum-classic': 'ETCUSDT',
+            'bitcoin-cash': 'BCHUSDT',
+            'algorand': 'ALGOUSDT',
+            'vechain': 'VETUSDT',
+            'filecoin': 'FILUSDT',
+            'aptos': 'APTUSDT',
+            'near': 'NEARUSDT',
+            'internet-computer': 'ICPUSDT',
+            'hedera-hashgraph': 'HBARUSDT',
+            'optimism': 'OPUSDT',
+            'arbitrum': 'ARBUSDT',
+            'zcash': 'ZECUSDT',
+            'aave': 'AAVEUSDT',
+            'maker': 'MKRUSDT',
+            'the-graph': 'GRTUSDT',
+            'fantom': 'FTMUSDT',
+            'elrond-erd-2': 'EGLDUSDT',
+            'tezos': 'XTZUSDT',
+            'theta-token': 'THETAUSDT',
+            'axie-infinity': 'AXSUSDT',
+            'eos': 'EOSUSDT',
+            'compound': 'COMPUSDT',
+            'decentraland': 'MANAUSDT',
+            'the-sandbox': 'SANDUSDT',
+            'crypto-com-chain': 'CROUSDT',
+        }
+    
+    def get_binance_symbol(self):
+        """Obtient le symbole Binance pour la crypto"""
+        return self.symbol_mapping.get(self.coin_id, None)
     
     def cache_valide(self):
         """Vérifie si le cache est valide"""
@@ -35,10 +95,10 @@ class DataCollector:
             age = (datetime.now() - cache_time).total_seconds()
             
             if age < self.cache_duration:
-                print(f"✅ Cache valide (âge: {age:.0f}s / {self.cache_duration}s)")
+                print(f"✅ Cache valide ({int(age)}s / {self.cache_duration}s)")
                 return True
             else:
-                print(f"⏰ Cache expiré (âge: {age:.0f}s > {self.cache_duration}s)")
+                print(f"⏰ Cache expiré ({int(age)}s)")
         except:
             pass
         
@@ -53,19 +113,19 @@ class DataCollector:
             return None
     
     def _respecter_rate_limit(self):
-        """Respecte le rate limit de CoinGecko"""
+        """Respecte le rate limit"""
         elapsed = time.time() - self.last_request_time
         if elapsed < self.min_delay:
             wait_time = self.min_delay - elapsed
             time.sleep(wait_time)
         self.last_request_time = time.time()
     
-    def _faire_requete(self, url, params, max_tentatives=3):
+    def _faire_requete(self, url, params, max_tentatives=3, source="API"):
         """Fait une requête avec retry automatique"""
         for tentative in range(max_tentatives):
             try:
                 self._respecter_rate_limit()
-                print(f"🔄 Requête: {url}")
+                print(f"🔄 Requête {source}: {url.split('/')[-1]}")
                 
                 response = requests.get(
                     url,
@@ -75,40 +135,149 @@ class DataCollector:
                 )
                 
                 if response.status_code == 429:
-                    raise Exception("Rate limit atteint (429)")
-                if response.status_code != 200:
-                    raise Exception(f"Erreur {response.status_code}")
+                    print(f"⚠️  Rate limit {source} (429)")
+                    raise Exception("Rate limit")
                 
-                print(f"✅ Succès!")
+                if response.status_code != 200:
+                    raise Exception(f"HTTP {response.status_code}")
+                
+                print(f"✅ Succès {source}!")
                 return response.json()
                 
             except Exception as e:
-                print(f"⚠️  {str(e)} - Tentative {tentative + 1}/{max_tentatives}")
+                print(f"⚠️  {source} erreur: {str(e)}")
                 if tentative < max_tentatives - 1:
-                    wait_time = (2 ** tentative) + 5
-                    print(f"⏳ Attente {wait_time}s...")
-                    time.sleep(wait_time)
+                    wait = 3
+                    print(f"⏳ Retry dans {wait}s...")
+                    time.sleep(wait)
         
-        raise Exception(f"Rate limit CoinGecko. Utilisation du cache...")
+        raise Exception(f"{source} indisponible après {max_tentatives} tentatives")
     
-    def get_current_price_realtime(self):
-        """✅ NOUVEAU: Récupère TOUJOURS le prix actuel en temps réel"""
-        print(f"💰 Récupération du prix actuel en TEMPS RÉEL...")
+    # =========================================================================
+    # BINANCE - OHLC
+    # =========================================================================
+    def telecharger_ohlc_binance(self):
+        """Télécharge OHLC depuis Binance"""
+        print(f"📥 [BINANCE] Téléchargement OHLC pour {self.coin_id.upper()}...")
         
-        url = f"{self.base_url}/simple/price"
+        symbol = self.get_binance_symbol()
+        if not symbol:
+            raise Exception(f"Crypto {self.coin_id} non disponible sur Binance")
+        
+        print(f"   Symbole Binance: {symbol}")
+        
+        # Binance utilise des timestamps en millisecondes
+        end_time = int(time.time() * 1000)
+        start_time = end_time - (self.days * 24 * 60 * 60 * 1000)
+        
+        url = f"{self.binance_base}/klines"
+        params = {
+            'symbol': symbol,
+            'interval': '1d',  # 1 jour
+            'startTime': start_time,
+            'endTime': end_time,
+            'limit': 1000
+        }
+        
+        data = self._faire_requete(url, params, max_tentatives=3, source="Binance")
+        
+        # Convertir format Binance → format CoinGecko
+        # Binance: [timestamp, open, high, low, close, volume, ...]
+        # CoinGecko: [timestamp, open, high, low, close]
+        
+        ohlc_formatted = []
+        for candle in data:
+            ohlc_formatted.append([
+                candle[0],  # timestamp (ms)
+                float(candle[1]),  # open
+                float(candle[2]),  # high
+                float(candle[3]),  # low
+                float(candle[4])   # close
+            ])
+        
+        print(f"✅ {len(ohlc_formatted)} jours OHLC Binance")
+        return ohlc_formatted
+    
+    # =========================================================================
+    # BINANCE - Prix actuel
+    # =========================================================================
+    def get_prix_actuel_binance(self):
+        """Récupère le prix actuel depuis Binance"""
+        print(f"💰 [BINANCE] Prix actuel temps réel...")
+        
+        symbol = self.get_binance_symbol()
+        if not symbol:
+            raise Exception("Symbol non disponible sur Binance")
+        
+        # Prix actuel
+        url_price = f"{self.binance_base}/ticker/price"
+        price_data = self._faire_requete(url_price, {'symbol': symbol}, source="Binance")
+        
+        # Stats 24h
+        url_24h = f"{self.binance_base}/ticker/24hr"
+        stats_24h = self._faire_requete(url_24h, {'symbol': symbol}, source="Binance")
+        
+        result = {
+            'current_price': float(price_data['price']),
+            'high_24h': float(stats_24h['highPrice']),
+            'low_24h': float(stats_24h['lowPrice']),
+            'price_change_percentage_24h': float(stats_24h['priceChangePercent']),
+            'volume_24h': float(stats_24h['volume']),
+            'market_cap': 0,  # Binance ne fournit pas le market cap
+            'source': 'binance'
+        }
+        
+        print(f"✅ Prix Binance: ${result['current_price']:,.2f}")
+        print(f"   Change 24h: {result['price_change_percentage_24h']:+.2f}%")
+        
+        return result
+    
+    # =========================================================================
+    # COINGECKO - OHLC (avec fallback)
+    # =========================================================================
+    def telecharger_ohlc_coingecko(self):
+        """Télécharge OHLC depuis CoinGecko"""
+        print(f"📥 [COINGECKO] Téléchargement OHLC...")
+        
+        url = f"{self.coingecko_base}/coins/{self.coin_id}/ohlc"
+        params = {
+            "vs_currency": "usd",
+            "days": self.days
+        }
+        
+        try:
+            data = self._faire_requete(url, params, max_tentatives=2, source="CoinGecko")
+            
+            if not data or len(data) < 7:
+                raise Exception("Pas assez de données")
+            
+            print(f"✅ {len(data)} jours OHLC CoinGecko")
+            return data
+            
+        except Exception as e:
+            print(f"⚠️  CoinGecko OHLC échoué: {str(e)}")
+            raise
+    
+    # =========================================================================
+    # COINGECKO - Prix actuel
+    # =========================================================================
+    def get_prix_actuel_coingecko(self):
+        """Récupère prix actuel depuis CoinGecko"""
+        print(f"💰 [COINGECKO] Prix actuel temps réel...")
+        
+        url = f"{self.coingecko_base}/simple/price"
         params = {
             "ids": self.coin_id,
             "vs_currencies": "usd",
             "include_24hr_change": "true",
-            "include_24hr_vol": "true",
             "include_market_cap": "true"
         }
         
         try:
-            data = self._faire_requete(url, params)
+            data = self._faire_requete(url, params, max_tentatives=2, source="CoinGecko")
             
             if self.coin_id not in data:
-                raise Exception(f"Crypto {self.coin_id} introuvable")
+                raise Exception("Crypto introuvable")
             
             coin_data = data[self.coin_id]
             
@@ -116,107 +285,77 @@ class DataCollector:
                 'current_price': coin_data.get('usd', 0),
                 'price_change_percentage_24h': coin_data.get('usd_24h_change', 0),
                 'market_cap': coin_data.get('usd_market_cap', 0),
-                'volume_24h': coin_data.get('usd_24h_vol', 0)
+                'source': 'coingecko'
             }
             
-            print(f"✅ Prix actuel: ${result['current_price']:,.2f}")
-            print(f"   Change 24h: {result['price_change_percentage_24h']:+.2f}%")
+            print(f"✅ Prix CoinGecko: ${result['current_price']:,.2f}")
             
             return result
             
         except Exception as e:
-            print(f"⚠️  Impossible de récupérer le prix actuel: {str(e)}")
-            return None
+            print(f"⚠️  CoinGecko prix échoué: {str(e)}")
+            raise
     
-    def telecharger_ohlc(self):
-        """Télécharge les données OHLC ou utilise le cache"""
-        print(f"📥 Téléchargement OHLC pour {self.coin_id.upper()}...")
+    # =========================================================================
+    # LOGIQUE HYBRIDE PRINCIPALE
+    # =========================================================================
+    def collecter_donnees(self):
+        """Collecte hybride avec fallback intelligent"""
+        print(f"\n{'='*60}")
+        print(f"🔄 COLLECTE HYBRIDE - {self.coin_id.upper()}")
+        print(f"{'='*60}\n")
         
-        # Vérifier le cache d'abord
+        # 1. Vérifier le cache d'abord
         if self.cache_valide():
             cache = self.charger_cache()
             if cache and 'ohlc' in cache:
-                print(f"✅ Utilisation du cache OHLC ({len(cache['ohlc'])} jours)")
-                return cache['ohlc']
+                print(f"✅ Utilisation du CACHE\n")
+                return cache
         
-        # Sinon, essayer de télécharger
-        url = f"{self.base_url}/coins/{self.coin_id}/ohlc"
-        params = {
-            "vs_currency": "usd",
-            "days": self.days
-        }
+        # 2. Collecter les données
+        ohlc_data = None
+        market_data = None
+        source_used = None
         
+        # Essayer CoinGecko en premier
         try:
-            data = self._faire_requete(url, params)
+            print("🎯 Tentative CoinGecko...\n")
+            ohlc_data = self.telecharger_ohlc_coingecko()
+            market_data = self.get_prix_actuel_coingecko()
+            source_used = 'coingecko'
+            print(f"\n✅ CoinGecko utilisé avec succès!\n")
             
-            if not data or len(data) < 7:
-                raise Exception("Pas assez de données OHLC")
-            
-            print(f"✅ {len(data)} jours OHLC récupérés")
-            return data
-        
         except Exception as e:
-            print(f"⚠️  {str(e)}")
-            print(f"📦 Chargement du cache OHLC...")
+            print(f"\n⚠️  CoinGecko échoué: {str(e)}")
+            print(f"🔄 Fallback vers Binance...\n")
             
-            cache = self.charger_cache()
-            if cache and 'ohlc' in cache:
-                print(f"✅ Données OHLC du cache utilisées")
-                return cache['ohlc']
-            
-            raise Exception("Impossible de récupérer les données OHLC (cache vide)")
-    
-    def telecharger_market_data(self):
-        """✅ CORRIGÉ: Récupère TOUJOURS le prix actuel en temps réel"""
-        print(f"📊 Récupération données de marché...")
+            # Fallback vers Binance
+            try:
+                ohlc_data = self.telecharger_ohlc_binance()
+                market_data = self.get_prix_actuel_binance()
+                source_used = 'binance'
+                print(f"\n✅ Binance utilisé avec succès!\n")
+                
+            except Exception as binance_error:
+                print(f"\n❌ Binance aussi échoué: {str(binance_error)}")
+                
+                # Dernier recours: cache même expiré
+                print(f"📦 Tentative cache expiré...\n")
+                cache = self.charger_cache()
+                if cache and 'ohlc' in cache:
+                    print(f"⚠️  Utilisation cache EXPIRÉ (mieux que rien!)\n")
+                    return cache
+                
+                raise Exception("Toutes les sources ont échoué (CoinGecko + Binance + Cache)")
         
-        # D'ABORD: Essayer le prix en temps réel (rapide et précis)
-        realtime = self.get_current_price_realtime()
-        if realtime and realtime['current_price'] > 0:
-            return realtime
-        
-        # FALLBACK: Essayer l'endpoint /markets
-        print(f"⚠️  Fallback sur /markets...")
-        url = f"{self.base_url}/coins/markets"
-        params = {
-            "vs_currency": "usd",
-            "ids": self.coin_id,
-            "order": "market_cap_desc",
-            "per_page": 1
-        }
-        
-        try:
-            data = self._faire_requete(url, params)
-            
-            if not data or len(data) == 0:
-                raise Exception("Pas de données de marché")
-            
-            market = data[0]
-            return {
-                'current_price': market.get('current_price', 0),
-                'high_24h': market.get('high_24h', 0),
-                'low_24h': market.get('low_24h', 0),
-                'price_change_percentage_24h': market.get('price_change_percentage_24h', 0),
-                'market_cap': market.get('market_cap', 0),
-                'volume_24h': market.get('total_volume', 0)
-            }
-        
-        except Exception as e:
-            print(f"⚠️  {str(e)}")
-            print(f"❌ ERREUR: Impossible de récupérer le prix actuel!")
-            
-            # ❌ PLUS DE DONNÉES SIMULÉES - on force l'erreur
-            raise Exception("Impossible de récupérer le prix actuel (API indisponible)")
-    
-    def sauvegarder(self, ohlc_data, market_data):
-        """Sauvegarde les données collectées"""
+        # 3. Sauvegarder les données
         data_output = {
             "coin_id": self.coin_id,
             "ohlc": ohlc_data,
             "market_data": market_data,
             "timestamp": datetime.now().isoformat(),
             "total_days": len(ohlc_data),
-            "cache_duration": self.cache_duration
+            "source": source_used
         }
         
         # Sauvegarder le cache
@@ -231,49 +370,37 @@ class DataCollector:
             json.dump(data_output, f, indent=2)
         
         print(f"💾 Données sauvegardées: {filename}")
-        print(f"📊 Prix actuel dans le fichier: ${market_data.get('current_price', 0):,.2f}")
-        return filename
+        print(f"📊 Source: {source_used.upper()}")
+        print(f"📊 Prix actuel: ${market_data.get('current_price', 0):,.2f}\n")
+        
+        return data_output
 
 def main():
     if len(sys.argv) < 2:
-        print("❌ Usage: python collect_data_v2.py <coin_id>")
+        print("❌ Usage: python collect_data_v3.py <coin_id>")
         sys.exit(1)
     
     coin_id = sys.argv[1]
     
-    print("=" * 60)
-    print(f"🚀 COLLECTE CoinGecko - {coin_id.upper()}")
-    print(f"⏰ Cache: 5 minutes | Prix: Temps réel")
-    print("=" * 60)
-    print()
-    
     try:
-        collector = DataCollector(coin_id, days=30)
+        collector = DataCollectorHybrid(coin_id, days=30)
+        result = collector.collecter_donnees()
         
-        # Télécharger OHLC (ou utiliser cache si < 5 min)
-        ohlc_data = collector.telecharger_ohlc()
-        
-        # Télécharger données de marché (TOUJOURS en temps réel)
-        market_data = collector.telecharger_market_data()
-        
-        # Sauvegarder
-        collector.sauvegarder(ohlc_data, market_data)
-        
-        print()
-        print("=" * 60)
+        print("="*60)
         print("✅ COLLECTE RÉUSSIE")
-        print("=" * 60)
-        print(f"OHLC: {len(ohlc_data)} jours")
-        print(f"Prix actuel: ${market_data.get('current_price', 0):,.2f}")
+        print("="*60)
+        print(f"Données: {result['total_days']} jours")
+        print(f"Source: {result['source'].upper()}")
+        print(f"Prix: ${result['market_data']['current_price']:,.2f}")
         print()
         
         sys.exit(0)
         
     except Exception as e:
         print()
-        print("=" * 60)
+        print("="*60)
         print("❌ ERREUR COLLECTE")
-        print("=" * 60)
+        print("="*60)
         print(f"Erreur: {str(e)}")
         print()
         sys.exit(1)
