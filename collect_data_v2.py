@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Collecte de données avec cache persistant
+Collecte de données avec cache persistant sur disque
 Évite les rate limits en réutilisant les données en cache
 """
 
